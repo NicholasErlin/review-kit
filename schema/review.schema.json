@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/NicholasErlin/review-kit/schema/review.schema.json",
+  "$id": "https://unpkg.com/@horus52/review-kit/schema/review.schema.json",
   "title": "review-kit review.json (format version 1)",
   "description": "Issues found, fixes shipped (with before/after screenshots) and the remaining plan for one project. Rich-text fields are sanitized Markdown or HTML. Asset paths must resolve inside the directory containing review.json.",
   "type": "object",
