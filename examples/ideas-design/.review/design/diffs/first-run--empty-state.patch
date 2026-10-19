@@ -1,0 +1,46 @@
+diff --git a/app/app.js b/app/app.js
+index 50b176d..c6e3a35 100644
+--- a/app/app.js
++++ b/app/app.js
+@@ -16,6 +16,8 @@ function render() {
+     li.querySelector('.remove').onclick = () => { tasks.splice(i, 1); render(); };
+     list.appendChild(li);
+   });
++  document.getElementById('empty').hidden = tasks.length > 0;
++  list.hidden = tasks.length === 0;
+   const left = tasks.filter((t) => !t.done).length;
+   count.textContent = `${left} left`;
+ }
+diff --git a/app/index.html b/app/index.html
+index 6cb12f5..cb5a0a6 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -13,10 +13,15 @@
+   </header>
+   <main class="page">
+     <form id="add" class="add">
++      <label for="text" class="add-label">New task</label>
+       <input id="text" class="add-input" placeholder="What needs doing?" autocomplete="off">
+       <button class="add-button" type="submit">Add task</button>
+     </form>
+     <ul id="list" class="list"></ul>
++    <section id="empty" class="empty" hidden>
++      <h2>Nothing to do yet</h2>
++      <p>Type a task above and press <b>Add task</b>. Tick it off when it is done; it stays in the list until you delete it.</p>
++    </section>
+   </main>
+   <script src="app.js"></script>
+ </body>
+diff --git a/app/style.css b/app/style.css
+index 83e89f5..a22b3f3 100644
+--- a/app/style.css
++++ b/app/style.css
+@@ -18,3 +18,8 @@ body { margin: 0; font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-seri
+ .task input { width: 18px; height: 18px; }
+ .task.done span { color: #d5dbdd; text-decoration: line-through; }
+ .remove { padding: 0 6px; font-size: 20px; color: #9aa6aa; background: none; border: 0; }
++.add { flex-wrap: wrap; }
++.add-label { flex: 1 0 100%; font-weight: 600; }
++.empty { padding: 28px 20px; text-align: center; background: #fff; border: 2px dashed #c9d3d6; border-radius: 10px; }
++.empty h2 { margin: 0 0 6px; font-size: 18px; }
++.empty p { margin: 0; color: #4a5a60; }

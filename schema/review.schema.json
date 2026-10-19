@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/NicholasErlin/review-kit/schema/review.schema.json",
   "title": "review-kit review.json (format version 1)",
-  "description": "Issues found, fixes shipped (with before/after screenshots) and the remaining plan for one project. Rich-text fields are sanitized Markdown or HTML. Asset paths must resolve inside the directory containing review.json.",
+  "description": "Issues found, fixes shipped (with before/after screenshots) and the remaining plan for one project; or the research, ideas and design proposals that come before them. Rich-text fields are sanitized Markdown or HTML. Asset paths must resolve inside the directory containing review.json.",
   "type": "object",
   "required": ["version", "project"],
   "additionalProperties": false,
@@ -37,6 +37,21 @@
       "type": "array",
       "description": "Free-form extra sections shown under the plan (measurements, methodology, ...).",
       "items": { "$ref": "#/$defs/appendixEntry" }
+    },
+    "research": {
+      "type": "array",
+      "description": "Findings from research (codebase, docs, standards, studies, comparable products), each with sources a reader can open. Ideas cite them by id.",
+      "items": { "$ref": "#/$defs/research" }
+    },
+    "ideas": {
+      "type": "array",
+      "description": "Proposed ideas with their reasoning, evidence, alternatives and risks, and the user's decision.",
+      "items": { "$ref": "#/$defs/idea" }
+    },
+    "proposals": {
+      "type": "array",
+      "description": "Design proposals: two or more options built on their own branches, scored against criteria agreed up front.",
+      "items": { "$ref": "#/$defs/proposal" }
     }
   },
   "$defs": {
@@ -76,7 +91,7 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "title": { "type": "string", "description": "Shown after the name in the header, e.g. \"UI/UX audit\". Default \"Review\"." },
-        "kind": { "enum": ["ui", "backend"], "default": "ui", "description": "What is reviewed: ui (UI/UX, with before/after screenshots) or backend (code practices; evidence is code, tests and output). Agents pick their review playbook and companion skills from it." },
+        "kind": { "enum": ["ui", "backend", "ideas", "design"], "default": "ui", "description": "What the review covers: ui (UI/UX, with before/after screenshots), backend (code practices; evidence is code, tests and output), ideas (research and proposed ideas) or design (options built on branches and compared). Agents pick their playbook and companion skills from it." },
         "description": { "$ref": "#/$defs/rich" },
         "date": { "type": "string", "description": "Review date, ISO 8601 preferred." },
         "repo": { "type": "string", "description": "Repository URL or path." },
@@ -242,6 +257,175 @@
         "title": { "type": "string", "minLength": 1 },
         "platform": { "type": "string" },
         "body": { "$ref": "#/$defs/rich" }
+      }
+    },
+    "refId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,40}$", "description": "Lower-case id safe to use in a git branch name (design/<proposal>/<option>)." },
+    "level": { "enum": ["low", "medium", "high"] },
+    "size": { "enum": ["S", "M", "L"] },
+    "inlineList": { "type": "array", "items": { "type": "string" }, "description": "Short inline rich-text items." },
+    "source": {
+      "type": "object",
+      "required": ["label", "href"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "href": { "type": "string", "minLength": 1, "description": "URL, or a path relative to review.json." },
+        "accessed": { "type": "string", "description": "When a web source was read, ISO 8601 date." },
+        "quote": { "type": "string", "description": "A short excerpt or number from the source, verbatim." },
+        "kind": { "type": "string", "description": "Optional hint: standard, docs, study, article, code, issue, product, ..." }
+      }
+    },
+    "research": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1, "description": "Plain text one-liner: the finding." },
+        "summary": { "$ref": "#/$defs/rich", "description": "What was found; keep facts apart from inference." },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/source" } },
+        "confidence": { "$ref": "#/$defs/level" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "date": { "type": "string" }
+      }
+    },
+    "ideaStatus": { "enum": ["proposed", "go", "maybe", "no", "done"] },
+    "idea": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1, "description": "Plain text one-liner." },
+        "status": { "$ref": "#/$defs/ideaStatus", "default": "proposed" },
+        "problem": { "$ref": "#/$defs/rich" },
+        "proposal": { "$ref": "#/$defs/rich" },
+        "reasoning": { "$ref": "#/$defs/rich", "description": "Why this, why now, and how the evidence supports it." },
+        "evidence": { "type": "array", "items": { "type": "string" }, "description": "Research ids this idea rests on." },
+        "alternatives": { "$ref": "#/$defs/rich", "description": "What else was considered (including doing nothing) and why not." },
+        "risks": { "$ref": "#/$defs/rich", "description": "What could go wrong and how to reduce it." },
+        "pros": { "$ref": "#/$defs/inlineList" },
+        "cons": { "$ref": "#/$defs/inlineList" },
+        "effort": { "$ref": "#/$defs/size" },
+        "impact": { "$ref": "#/$defs/size" },
+        "confidence": { "$ref": "#/$defs/level" },
+        "decision": { "$ref": "#/$defs/rich", "description": "The user's call and why." },
+        "proposals": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Design proposal ids (they may live in the design review)."
+        },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "date": { "type": "string" },
+        "rank": { "type": "integer", "description": "Order in the shortlist (ascending)." }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string", "minLength": 1 },
+        "weight": { "type": "integer", "minimum": 1, "maximum": 5, "default": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "score": {
+      "type": "object",
+      "required": ["score"],
+      "additionalProperties": false,
+      "properties": {
+        "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "note": { "$ref": "#/$defs/rich", "description": "Why this score." }
+      }
+    },
+    "diffFile": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "add": { "type": "integer", "minimum": 0 },
+        "del": { "type": "integer", "minimum": 0 },
+        "binary": { "type": "boolean" }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "The diff snapshot, relative to review.json (e.g. diffs/<proposal>--<option>.patch)." },
+        "files": { "type": "array", "items": { "$ref": "#/$defs/diffFile" } },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean", "description": "The snapshot was cut at the size cap." }
+      }
+    },
+    "optionPlatform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "description": { "$ref": "#/$defs/rich" }, "images": { "type": "array", "items": { "$ref": "#/$defs/image" } } }
+    },
+    "optionStatus": { "enum": ["proposed", "adopted", "rejected"] },
+    "option": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/refId" },
+        "title": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/optionStatus", "default": "proposed" },
+        "summary": { "$ref": "#/$defs/rich", "description": "What this option does and what makes it distinct." },
+        "reasoning": { "$ref": "#/$defs/rich" },
+        "pros": { "$ref": "#/$defs/inlineList" },
+        "cons": { "$ref": "#/$defs/inlineList" },
+        "scores": { "type": "object", "description": "Keyed by criterion id.", "additionalProperties": { "$ref": "#/$defs/score" } },
+        "evidence": { "$ref": "#/$defs/rich", "description": "Test output, measurements, lint results." },
+        "branch": { "type": "string", "description": "design/<proposal>/<option>" },
+        "base": { "type": "string", "description": "Commit the branch started from." },
+        "head": { "type": "string", "description": "Branch head when the diff snapshot was taken." },
+        "worktree": { "type": "string", "description": "Worktree folder relative to the repository root (never absolute)." },
+        "gone": { "type": "boolean", "description": "The branch and worktree were removed with `review-kit discard`; the snapshot remains." },
+        "diff": { "$ref": "#/$defs/diff" },
+        "platforms": {
+          "type": "object",
+          "description": "Keyed by platform id.",
+          "additionalProperties": { "$ref": "#/$defs/optionPlatform" }
+        }
+      }
+    },
+    "proposalStatus": { "enum": ["open", "adopted", "closed"] },
+    "proposal": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/refId" },
+        "title": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/proposalStatus", "default": "open" },
+        "brief": { "$ref": "#/$defs/rich", "description": "What is being decided, and the constraints." },
+        "idea": { "type": "string", "description": "The idea this proposal comes from (it may live in the ideas review)." },
+        "date": { "type": "string" },
+        "criteria": { "type": "array", "items": { "$ref": "#/$defs/criterion" } },
+        "recommendation": {
+          "type": "object",
+          "required": ["option"],
+          "additionalProperties": false,
+          "properties": {
+            "option": { "type": "string" },
+            "reasoning": { "$ref": "#/$defs/rich", "description": "Why it wins, and when another option would be the better choice." }
+          }
+        },
+        "decision": { "$ref": "#/$defs/rich" },
+        "adopted": {
+          "type": "object",
+          "required": ["option"],
+          "additionalProperties": false,
+          "properties": { "option": { "type": "string" }, "commit": { "type": "string" }, "date": { "type": "string" } }
+        },
+        "options": { "type": "array", "items": { "$ref": "#/$defs/option" } }
       }
     }
   }

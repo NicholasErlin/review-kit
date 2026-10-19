@@ -48,6 +48,8 @@ export function init(directory: string, name: string, title = 'Review', platform
     areas: [], issues: [], fixes: [], plan: [],
   };
   if (kind) data.project.kind = kind;
+  if (kind === 'ideas') Object.assign(data, { research: [], ideas: [] });
+  if (kind === 'design') data.proposals = [];
   if (accent) data.project.theme = { accent };
   model.save(path, data);
   for (const sub of ['screenshots', 'pending']) {
@@ -105,7 +107,7 @@ function sameFile(a: string, b: string): boolean {
 }
 
 /** Absolute image paths are copied into <review>/screenshots/<subdir>/ and rewritten as relative. */
-function importImage(img: any, reviewDir: string, subdir: string): any {
+export function importImage(img: any, reviewDir: string, subdir: string): any {
   const src = model.imageSrc(img);
   if (!truthy(src) || !isabs(src)) return img;
   if (!isfile(src)) throw new ReviewError(`image not found: ${src}`);
@@ -151,7 +153,7 @@ function importFixImages(fix: Record<string, any>, reviewDir: string): void {
   }
 }
 
-function appendNote(old: any, add: any): any {
+export function appendNote(old: any, add: any): any {
   if (!truthy(old)) return add;
   if (!truthy(add) || old.includes(add)) return old;
   return rstrip(old) + '\n\n' + add;

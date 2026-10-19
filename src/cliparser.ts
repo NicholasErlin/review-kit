@@ -2,20 +2,33 @@
 import { ArgumentParser, SUPPRESS } from './argparse.js';
 import { VERSION } from './version.js';
 
-const KINDS = ['ui', 'backend'];
+const KINDS = ['ui', 'backend', 'ideas', 'design'];
+const IDEA_STATUSES = ['proposed', 'go', 'maybe', 'no', 'done'];
+const LEVELS = ['low', 'medium', 'high'];
+const SIZES = ['S', 'M', 'L'];
 const ISSUE_STATUSES = ['open', 'partial', 'fixed', 'notabug', 'wontfix'];
 const PLAN_STATUSES = ['todo', 'doing', 'partial', 'done', 'dropped'];
 
 function reviewArg(p: ArgumentParser, several = false): void {
   p.addArgument(['review'], several ? {
     nargs: '*',
-    help: 'review.json, its folder or a kind (ui, backend); several, or a parent folder such as .review, give one '
+    help: 'review.json, its folder or a kind (ui, backend, ideas, design); several, or a parent folder such as .review, give one '
       + 'combined site (default: auto-discover, combining every .review/<kind>/ when there are several)',
   } : {
     nargs: '?',
-    help: 'path to review.json or its folder, or a kind (ui, backend) for .review/<kind>/ (default: auto-discover)',
+    help: 'path to review.json or its folder, or a kind (ui, backend, ideas, design) for .review/<kind>/ (default: auto-discover)',
   });
   p.addArgument(['-r', '--review-path'], { dest: 'review_opt', help: SUPPRESS });
+}
+
+/** Commands whose positionals may start with an optional review: `cmd [review] <args...>` (resolved in cli.ts). */
+function wordsArg(p: ArgumentParser, help: string): void {
+  p.addArgument(['words'], { nargs: '+', metavar: 'ARG', help });
+  p.addArgument(['-r', '--review'], {
+    dest: 'review_opt',
+    metavar: 'REVIEW',
+    help: 'path to review.json or its folder, or a kind (ideas, design) for .review/<kind>/ (default: auto-discover)',
+  });
 }
 
 function jsonArgs(p: ArgumentParser): void {
@@ -35,7 +48,7 @@ export function parser(): ArgumentParser {
   let s = sub.addParser('init', { help: 'scaffold review.json, screenshots/ and pending/' });
   s.addArgument(['dir'], { nargs: '?', default: '.review', help: 'directory to create (default .review)' });
   s.addArgument(['--name'], { help: 'project name (default: current folder name)' });
-  s.addArgument(['--kind'], { choices: KINDS, help: 'ui (UI/UX) or backend; sets the title and platform defaults' });
+  s.addArgument(['--kind'], { choices: KINDS, help: 'ui (UI/UX), backend, ideas or design; sets the title and platform defaults' });
   s.addArgument(['--title'], { help: 'shown after the name, e.g. "UI/UX audit" (default from --kind, else "Review")' });
   s.addArgument(['--platforms'], {
     help: 'comma list, e.g. "mobile,desktop" or "web" (default mobile,desktop; none for backend)',
@@ -47,14 +60,14 @@ export function parser(): ArgumentParser {
     help: 'set a repo up: create (or reuse) .review/<kind>/ and point AGENTS.md at the review-kit skill',
   });
   s.addArgument(['repo'], { nargs: '?', default: '.', help: 'repository folder (default: current folder)' });
-  s.addArgument(['--kind'], { default: 'ui', help: 'comma list of review kinds: ui, backend (default ui)' });
+  s.addArgument(['--kind'], { default: 'ui', help: 'comma list of review kinds: ui, backend, ideas, design (default ui)' });
   s.addArgument(['--dir'], {
     default: '.review',
     help: 'parent folder for the reviews (default .review, giving .review/ui/ ...)',
   });
   s.addArgument(['--name'], { help: 'project name (default: repo folder name)' });
   s.addArgument(['--title'], { help: 'header title (default per kind: "UI/UX review", "Backend review")' });
-  s.addArgument(['--platforms'], { help: 'UI review platforms (default mobile,desktop)' });
+  s.addArgument(['--platforms'], { help: 'UI and design review platforms (default mobile,desktop)' });
   s.addArgument(['--accent']);
   s.addArgument(['--ignore-screenshots'], { action: 'store_true' });
   s.addArgument(['--agents-file'], {
@@ -188,8 +201,110 @@ export function parser(): ArgumentParser {
     help: 'list what would be removed without deleting anything',
   });
 
+  s = sub.addParser('add-research', { help: 'add (or --update) a research finding with its sources' });
+  reviewArg(s);
+  jsonArgs(s);
+  s.addArgument(['--id'], { help: 'default r-<n>' });
+  s.addArgument(['--title'], { help: 'the finding, one plain line' });
+  s.addArgument(['--summary'], { help: 'what was found; keep facts apart from inference (Markdown)' });
+  s.addArgument(['--source'], { action: 'append', metavar: 'LABEL=URL', help: 'a source a reader can open (repeatable)' });
+  s.addArgument(['--quote'], { action: 'append', help: 'short verbatim excerpt; the n-th --quote goes with the n-th --source' });
+  s.addArgument(['--accessed'], { metavar: 'DATE', help: 'when the web sources were read (default today for http(s) sources)' });
+  s.addArgument(['--kind'], { dest: 'source_kind', metavar: 'KIND', help: 'source kind for every --source: standard, docs, study, article, code, ...' });
+  s.addArgument(['--confidence'], { choices: LEVELS });
+  s.addArgument(['--tags'], { help: 'comma list' });
+  s.addArgument(['--update'], { action: 'store_true', help: 'merge into the entry with --id (sources are added)' });
+
+  s = sub.addParser('add-idea', { help: 'add (or --update) an idea with its reasoning, evidence, alternatives and risks' });
+  reviewArg(s);
+  jsonArgs(s);
+  s.addArgument(['--id'], { help: 'default i-<n>' });
+  s.addArgument(['--title']);
+  for (const f of ['problem', 'proposal', 'reasoning', 'alternatives', 'risks']) s.addArgument(['--' + f], { help: 'Markdown' });
+  s.addArgument(['--evidence'], { metavar: 'IDS', help: 'comma list of research ids, e.g. r-1,r-2' });
+  s.addArgument(['--pro'], { action: 'append', help: 'repeatable' });
+  s.addArgument(['--con'], { action: 'append', help: 'repeatable' });
+  s.addArgument(['--effort'], { choices: SIZES });
+  s.addArgument(['--impact'], { choices: SIZES });
+  s.addArgument(['--confidence'], { choices: LEVELS });
+  s.addArgument(['--status'], { choices: IDEA_STATUSES });
+  s.addArgument(['--rank'], { type: 'int' });
+  s.addArgument(['--tags'], { help: 'comma list' });
+  s.addArgument(['--update'], { action: 'store_true', help: 'merge into the idea with --id' });
+
+  s = sub.addParser('decide', {
+    help: "record the user's call on an idea",
+    usage: 'review-kit decide [review] <idea> proposed|go|maybe|no|done [--note TEXT]',
+  });
+  wordsArg(s, '[review] <idea> <status>');
+  s.addArgument(['--note'], { help: 'the decision and why (appended to the idea\'s decision)' });
+
+  s = sub.addParser('add-proposal', { help: 'add (or --update) a design proposal: the brief and the criteria options are scored on' });
+  reviewArg(s);
+  jsonArgs(s);
+  s.addArgument(['--id'], { help: 'lower-case letters, digits and "-"; becomes part of the branch names' });
+  s.addArgument(['--title']);
+  s.addArgument(['--brief'], { help: 'what is being decided, and the constraints (Markdown)' });
+  s.addArgument(['--idea'], { help: 'the idea this comes from (may live in the ideas review)' });
+  s.addArgument(['--criterion'], { action: 'append', metavar: 'ID=LABEL:WEIGHT', help: 'scoring criterion, weight 1-5 (repeatable)' });
+  s.addArgument(['--status'], { choices: ['open', 'adopted', 'closed'] });
+  s.addArgument(['--update'], { action: 'store_true', help: 'merge into the proposal with --id (criteria merged by id)' });
+
+  s = sub.addParser('option', {
+    help: 'start a design option on its own branch and worktree (new), or record its write-up, scores and diff (record)',
+    usage: 'review-kit option new [review] <proposal> <option> --title TEXT [--base REF] [--worktree-root DIR]\n'
+      + '       review-kit option record [review] <proposal> <option> [--summary] [--reasoning] [--pro X]... [--con X]... '
+      + '[--score CRIT=N[:NOTE]]... [--evidence] [--shot PLATFORM PATH [CAPTION]]...',
+  });
+  wordsArg(s, 'new|record [review] <proposal> <option>');
+  s.addArgument(['--title']);
+  s.addArgument(['--base'], { metavar: 'REF', default: 'HEAD', help: 'new: commit the branch starts from (default HEAD)' });
+  s.addArgument(['--worktree-root'], {
+    metavar: 'DIR',
+    help: 'new: parent folder for the worktree (default <repo>.designs/ next to the repository)',
+  });
+  for (const f of ['summary', 'reasoning', 'evidence']) s.addArgument(['--' + f], { help: 'record: Markdown' });
+  s.addArgument(['--pro'], { action: 'append', help: 'record: repeatable (replaces the list)' });
+  s.addArgument(['--con'], { action: 'append', help: 'record: repeatable (replaces the list)' });
+  s.addArgument(['--score'], { action: 'append', metavar: 'CRIT=N[:NOTE]', help: 'record: score 1-5 on a criterion (repeatable)' });
+  s.addArgument(['--shot'], {
+    action: 'append',
+    nargs: '+',
+    metavar: 'ARG',
+    help: 'record: PLATFORM PATH [CAPTION], a screenshot for a platform (repeatable; copied into screenshots/<proposal>--<option>/)',
+  });
+
+  s = sub.addParser('recommend', {
+    help: 'recommend one option of a proposal, with the reasoning',
+    usage: 'review-kit recommend [review] <proposal> <option> --reasoning TEXT',
+  });
+  wordsArg(s, '[review] <proposal> <option>');
+  s.addArgument(['--reasoning'], { required: true, help: 'why it wins, and when another option would be the better choice' });
+
+  s = sub.addParser('adopt', {
+    help: "merge the option the user picked into the current branch (squashed; only on the user's word)",
+    usage: 'review-kit adopt [review] <proposal> <option> [--no-commit] [--message TEXT] [--record-only]',
+  });
+  wordsArg(s, '[review] <proposal> <option>');
+  s.addArgument(['--no-commit'], { action: 'store_true', help: 'leave the changes staged' });
+  s.addArgument(['-m', '--message'], { help: 'commit message (default "Adopt design <proposal>: <option title>")' });
+  s.addArgument(['--record-only'], {
+    action: 'store_true',
+    help: 'only record the adoption at HEAD (after merging by hand, e.g. once a conflict is resolved)',
+  });
+
+  s = sub.addParser('discard', {
+    help: 'remove the branches and worktrees of design options (snapshots and screenshots stay)',
+    usage: 'review-kit discard [review] <proposal> [--option ID]... [--force] [--dry-run]',
+  });
+  wordsArg(s, '[review] <proposal>');
+  s.addArgument(['--option'], { action: 'append', help: 'only this option (repeatable; default: every option not adopted, '
+    + 'plus the adopted one once merged)' });
+  s.addArgument(['--force'], { action: 'store_true', help: 'also remove worktrees with uncommitted changes' });
+  s.addArgument(['-n', '--dry-run'], { action: 'store_true', help: 'list what would be removed' });
+
   s = sub.addParser('companions', {
-    help: 'show, install or update the bundled agent skills that UI/UX and backend reviews use',
+    help: 'show, install or update the bundled agent skills that UI/UX, backend and design reviews use',
   });
   s.addArgument(['action'], {
     nargs: '?',
@@ -197,7 +312,7 @@ export function parser(): ArgumentParser {
     default: 'list',
     help: 'list (default), install (link the bundled skills), update (maintainers: refresh the bundle)',
   });
-  s.addArgument(['--kind'], { help: 'comma list: ui, backend (default both)' });
+  s.addArgument(['--kind'], { help: 'comma list: ui, backend, ideas, design (default ui,backend, which covers every companion)' });
   s.addArgument(['--skills-dir'], {
     action: 'append',
     metavar: 'DIR',

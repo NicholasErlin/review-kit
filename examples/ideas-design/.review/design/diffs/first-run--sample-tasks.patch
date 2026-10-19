@@ -1,0 +1,36 @@
+diff --git a/app/app.js b/app/app.js
+index 50b176d..80baf64 100644
+--- a/app/app.js
++++ b/app/app.js
+@@ -1,5 +1,12 @@
+ // Pocket Tasks: a tiny task list. A first-time user starts with no tasks.
+-const tasks = [];
++const SAMPLES = [
++  { text: 'Tick this box to finish a task', done: false },
++  { text: 'Add your own task in the box above', done: false },
++  { text: 'Delete a task with the × button', done: false },
++];
++const seen = localStorage.getItem('pocket-tasks-seen');
++const tasks = seen ? [] : SAMPLES.map((t) => ({ ...t, sample: true }));
++localStorage.setItem('pocket-tasks-seen', '1');
+ 
+ const list = document.getElementById('list');
+ const count = document.getElementById('count');
+@@ -8,7 +15,7 @@ function render() {
+   list.innerHTML = '';
+   tasks.forEach((t, i) => {
+     const li = document.createElement('li');
+-    li.className = 'task' + (t.done ? ' done' : '');
++    li.className = 'task' + (t.done ? ' done' : '') + (t.sample ? ' sample' : '');
+     li.innerHTML = `<label><input type="checkbox" ${t.done ? 'checked' : ''}> <span></span></label>
+       <button class="remove" title="Delete">×</button>`;
+     li.querySelector('span').textContent = t.text;
+diff --git a/app/style.css b/app/style.css
+index 83e89f5..318e7ba 100644
+--- a/app/style.css
++++ b/app/style.css
+@@ -18,3 +18,4 @@ body { margin: 0; font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-seri
+ .task input { width: 18px; height: 18px; }
+ .task.done span { color: #d5dbdd; text-decoration: line-through; }
+ .remove { padding: 0 6px; font-size: 20px; color: #9aa6aa; background: none; border: 0; }
++.task.sample span { font-style: italic; color: #4a5a60; }

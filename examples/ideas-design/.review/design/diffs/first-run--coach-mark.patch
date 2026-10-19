@@ -1,0 +1,52 @@
+diff --git a/app/app.js b/app/app.js
+index 50b176d..f934837 100644
+--- a/app/app.js
++++ b/app/app.js
+@@ -25,7 +25,19 @@ document.getElementById('add').onsubmit = (e) => {
+   const input = document.getElementById('text');
+   if (input.value.trim()) tasks.unshift({ text: input.value.trim(), done: false });
+   input.value = '';
+-  render();
++  const tip = document.getElementById('tip');
++tip.hidden = localStorage.getItem('pocket-tasks-tip') === 'done';
++const closeTip = () => { tip.hidden = true; localStorage.setItem('pocket-tasks-tip', 'done'); };
++document.getElementById('tip-close').onclick = closeTip;
++document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tip.hidden) closeTip(); });
++
++render();
+ };
+ 
++const tip = document.getElementById('tip');
++tip.hidden = localStorage.getItem('pocket-tasks-tip') === 'done';
++const closeTip = () => { tip.hidden = true; localStorage.setItem('pocket-tasks-tip', 'done'); };
++document.getElementById('tip-close').onclick = closeTip;
++document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tip.hidden) closeTip(); });
++
+ render();
+diff --git a/app/index.html b/app/index.html
+index 6cb12f5..9eeb543 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -16,6 +16,10 @@
+       <input id="text" class="add-input" placeholder="What needs doing?" autocomplete="off">
+       <button class="add-button" type="submit">Add task</button>
+     </form>
++    <div id="tip" class="tip" role="note" hidden>
++      <p>Start here: type a task and press <b>Add task</b>.</p>
++      <button id="tip-close" class="tip-close" type="button">Got it</button>
++    </div>
+     <ul id="list" class="list"></ul>
+   </main>
+   <script src="app.js"></script>
+diff --git a/app/style.css b/app/style.css
+index 83e89f5..6227862 100644
+--- a/app/style.css
++++ b/app/style.css
+@@ -18,3 +18,7 @@ body { margin: 0; font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-seri
+ .task input { width: 18px; height: 18px; }
+ .task.done span { color: #d5dbdd; text-decoration: line-through; }
+ .remove { padding: 0 6px; font-size: 20px; color: #9aa6aa; background: none; border: 0; }
++.tip { position: relative; display: flex; align-items: center; gap: 12px; width: 560px; margin: -6px 0 18px; padding: 12px 14px; color: #fff; background: #1f2a30; border-radius: 8px; }
++.tip::before { content: ""; position: absolute; top: -8px; left: 24px; border: 8px solid transparent; border-top: 0; border-bottom-color: #1f2a30; }
++.tip p { margin: 0; flex: 1; }
++.tip-close { min-height: 44px; padding: 0 14px; font: inherit; color: #1f2a30; background: #fff; border: 0; border-radius: 6px; }

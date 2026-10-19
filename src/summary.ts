@@ -40,6 +40,15 @@ export function summarise(data: any, openLimit = 8, markdown = true): string {
     return c;
   };
 
+  const research: any[] = get(data, 'research') || [];
+  const ideas: any[] = get(data, 'ideas') || [];
+  const proposals: any[] = get(data, 'proposals') || [];
+  const ideasPart = ideasSummary(research, ideas, proposals, b);
+  if (ideasPart.length && !issues.length && !fixes.length) { // an ideas or design review: skip the empty issue lines
+    lines.push(...ideasPart, ...planLines(data, b));
+    return lines.join('\n');
+  }
+
   const c = counts(issues);
   const done = RESOLVED.reduce((n, s) => n + c[s], 0);
   const pct = issues.length ? pyRound((100 * (done + c.partial / 2)) / issues.length) : 0;
@@ -88,6 +97,13 @@ export function summarise(data: any, openLimit = 8, markdown = true): string {
     }
     if (left.length > openLimit) lines.push(`- ... and ${left.length - openLimit} more`);
   }
+  lines.push(...planLines(data, b));
+  lines.push(...ideasPart);
+  return lines.join('\n');
+}
+
+function planLines(data: any, b: string): string[] {
+  const out: string[] = [];
   const items: any[] = [];
   for (const g of get(data, 'plan') || []) items.push(...(get(g, 'items') || []));
   if (items.length) {
@@ -96,7 +112,50 @@ export function summarise(data: any, openLimit = 8, markdown = true): string {
       const st = has(it, 'status') ? it.status : 'todo';
       pc.set(st, (pc.get(st) || 0) + 1);
     }
-    lines.push(`${b}Plan:${b} ${items.length} items: ` + [...pc.keys()].sort(cmpStr).map((k) => `${pc.get(k)} ${k}`).join(', '));
+    out.push(`${b}Plan:${b} ${items.length} items: ` + [...pc.keys()].sort(cmpStr).map((k) => `${pc.get(k)} ${k}`).join(', '));
   }
-  return lines.join('\n');
+  return out;
+}
+
+const SIZE_RANK: Record<string, number> = { L: 0, M: 1, S: 2 };
+
+/** Lines about research, ideas and proposals (none when the review has none). */
+function ideasSummary(research: any[], ideas: any[], proposals: any[], b: string): string[] {
+  const lines: string[] = [];
+  if (research.length) {
+    const unsourced = research.filter((r) => !(get(r, 'sources') || []).length).length;
+    const sources = research.reduce((n, r) => n + (get(r, 'sources') || []).length, 0);
+    lines.push(`${b}Research:${b} ${research.length} findings, ${sources} sources` + (unsourced ? ` (${unsourced} without a source)` : ''));
+  }
+  if (ideas.length) {
+    const st = (i: any) => (has(i, 'status') ? i.status : 'proposed');
+    const parts = model.IDEA_STATUSES.map((x) => [x, ideas.filter((i) => st(i) === x).length] as [string, number])
+      .filter(([, n]) => n).map(([x, n]) => `${n} ${x}`);
+    lines.push(`${b}Ideas:${b} ${ideas.length} total, ${parts.join(', ')}`);
+    const top = ideas.map((i, n) => ({ i, n })).filter(({ i }) => st(i) !== 'no')
+      .sort((x, y) => (SIZE_RANK[get(x.i, 'impact')] ?? 3) - (SIZE_RANK[get(y.i, 'impact')] ?? 3)
+        || (get(x.i, 'rank') ?? 1e9) - (get(y.i, 'rank') ?? 1e9) || x.n - y.n)
+      .slice(0, 5);
+    if (top.length) {
+      lines.push(`${b}Top ideas by impact:${b}`);
+      for (const { i } of top) {
+        const size = ['impact', 'effort'].filter((k) => truthy(get(i, k))).map((k) => `${k} ${S(i[k])}`).join(', ');
+        lines.push(`- ${S(i.id)} [${st(i)}${size ? ', ' + size : ''}]: ${plain(i.title)}`);
+      }
+    }
+  }
+  if (proposals.length) {
+    lines.push(`${b}Proposals:${b} ${proposals.length}`);
+    for (const p of proposals) {
+      const opts: any[] = get(p, 'options') || [];
+      const rec = get(p, 'recommendation');
+      const ad = get(p, 'adopted');
+      let state = has(p, 'status') ? p.status : 'open';
+      if (ad) state = `adopted ${S(ad.option)}` + (truthy(get(ad, 'commit')) ? ` in ${S(ad.commit).slice(0, 7)}` : ' (not committed)');
+      lines.push(`- ${S(p.id)}: ${plain(p.title)} [${state}] ${opts.length} option(s)`
+        + (opts.length ? ` (${opts.map((o) => S(o.id)).join(', ')})` : '')
+        + (rec ? `; recommends ${S(rec.option)}` : ''));
+    }
+  }
+  return lines;
 }

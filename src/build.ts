@@ -21,6 +21,9 @@ export const STATUS_LABELS = {
   open: 'Open', partial: 'Partly fixed', fixed: 'Fixed', notabug: 'Not a bug', wontfix: "Won't fix",
 };
 export const PLAN_LABELS = { todo: 'To do', doing: 'In progress', partial: 'Partly done', done: 'Done', dropped: 'Dropped' };
+export const IDEA_LABELS = { proposed: 'Proposed', go: 'Go', maybe: 'Maybe', no: 'No', done: 'Done' };
+export const PROPOSAL_LABELS = { open: 'Open', adopted: 'Adopted', closed: 'Closed' };
+export const OPTION_LABELS = { proposed: 'Proposed', adopted: 'Adopted', rejected: 'Rejected' };
 
 const S = model.s;
 
@@ -196,6 +199,7 @@ export function compileData(data: any, base: string, assets: Assets): Record<str
     });
     return { id: dget(g, 'id', ''), title: g.title, platform: get(g, 'platform') ?? null, intro: rich(get(g, 'intro')), items };
   });
+  const { research, ideas, proposals } = compileIdeas(data, base, assets, fmt, img);
   const appendix = (get(data, 'appendix') || []).map((a: any) => ({ title: a.title, platform: get(a, 'platform') ?? null, body: rich(a.body) }));
   const theme = or(get(proj, 'theme'), {});
   const outPlats = plats.map((p: any) => {
@@ -210,7 +214,7 @@ export function compileData(data: any, base: string, assets: Assets): Record<str
     kit: VERSION,
     generated,
     project: {
-      name: proj.name, title: dget(proj, 'title', 'Review'), desc,
+      name: proj.name, title: dget(proj, 'title', 'Review'), kind: dget(proj, 'kind', 'ui'), desc,
       date: dget(proj, 'date', ''), repo: dget(proj, 'repo', ''),
       links: projLinks,
       theme: {
@@ -225,8 +229,108 @@ export function compileData(data: any, base: string, assets: Assets): Record<str
     })),
     statusLabels: STATUS_LABELS,
     planLabels: PLAN_LABELS,
-    areas, issues, fixes, plan, appendix,
+    ideaStatusLabels: IDEA_LABELS,
+    proposalStatusLabels: PROPOSAL_LABELS,
+    optionStatusLabels: OPTION_LABELS,
+    areas, issues, fixes, plan, appendix, research, ideas, proposals,
   };
+}
+
+/** Weighted total of an option's scores, normalised to 0-100 (a missing score counts as 0); null without criteria. */
+export function weightedTotal(criteria: any[], scores: Record<string, any>): number | null {
+  let got = 0;
+  let max = 0;
+  for (const c of criteria) {
+    const w = dget(c, 'weight', 1);
+    max += 5 * w;
+    const sc = get(scores, c.id);
+    if (sc && typeof sc.score === 'number') got += w * sc.score;
+  }
+  return max ? Math.round((100 * got) / max) : null;
+}
+
+/** The diff snapshot as text (capped like `option record`, so a hand-made patch cannot bloat data.js). */
+function diffText(base: string, path: string): [string, boolean] {
+  const buf = fs.readFileSync(safety.localSource(base, path));
+  if (buf.length <= model.DIFF_CAP) return [buf.toString('utf8'), false];
+  let cut = buf.subarray(0, model.DIFF_CAP);
+  const nl = cut.lastIndexOf(0x0a);
+  if (nl > 0) cut = cut.subarray(0, nl + 1);
+  return [cut.toString('utf8'), true];
+}
+
+/** research, ideas and proposals in the shape app.js reads (rich text rendered; no worktree or absolute paths). */
+function compileIdeas(data: any, base: string, assets: Assets, fmt: string, img: (x: any, plat?: any) => any) {
+  const rich = (t: any) => markdown.toHtml(truthy(t) ? t : '', fmt);
+  const list = (v: any) => (Array.isArray(v) ? v.map((x: any) => rich(x)) : []);
+  const ideasIn: any[] = get(data, 'ideas') || [];
+  const citedBy = new Map<any, any[]>();
+  for (const it of ideasIn) {
+    for (const r of get(it, 'evidence') || []) {
+      if (!citedBy.has(r)) citedBy.set(r, []);
+      if (!citedBy.get(r)!.includes(it.id)) citedBy.get(r)!.push(it.id);
+    }
+  }
+  const research = (get(data, 'research') || []).map((r: any) => ({
+    id: r.id, title: r.title, html: rich(get(r, 'summary')),
+    sources: (get(r, 'sources') || []).map((x: any) => ({
+      label: x.label, href: assets.link(x.href), accessed: dget(x, 'accessed', ''), quote: dget(x, 'quote', ''),
+      kind: dget(x, 'kind', ''),
+    })),
+    confidence: get(r, 'confidence') ?? null, tags: or(get(r, 'tags'), []), date: dget(r, 'date', ''),
+    ideas: citedBy.get(r.id) || [],
+  }));
+  const ideas = ideasIn.map((it: any) => ({
+    id: it.id, title: it.title, status: dget(it, 'status', 'proposed'),
+    problem: rich(get(it, 'problem')), proposal: rich(get(it, 'proposal')), reasoning: rich(get(it, 'reasoning')),
+    alternatives: rich(get(it, 'alternatives')), risks: rich(get(it, 'risks')), decision: rich(get(it, 'decision')),
+    pros: list(get(it, 'pros')), cons: list(get(it, 'cons')),
+    effort: get(it, 'effort') ?? null, impact: get(it, 'impact') ?? null, confidence: get(it, 'confidence') ?? null,
+    evidence: or(get(it, 'evidence'), []), proposals: or(get(it, 'proposals'), []), tags: or(get(it, 'tags'), []),
+    date: dget(it, 'date', ''), rank: get(it, 'rank') ?? null,
+  }));
+  const proposals = (get(data, 'proposals') || []).map((pr: any) => {
+    const criteria: any[] = get(pr, 'criteria') || [];
+    const rec = get(pr, 'recommendation');
+    const adopted = get(pr, 'adopted');
+    const options = (get(pr, 'options') || []).map((o: any) => {
+      const scores: Record<string, any> = {};
+      const raw = or(get(o, 'scores'), {});
+      for (const c of Object.keys(raw)) scores[c] = { score: raw[c].score, note: rich(get(raw[c], 'note')) };
+      const d = get(o, 'diff');
+      let diff = null;
+      if (d) {
+        const [text, cut] = diffText(base, d.path);
+        diff = {
+          text, truncated: cut || get(d, 'truncated') === true,
+          files: (get(d, 'files') || []).map((f: any) => ({ path: f.path, add: dget(f, 'add', 0), del: dget(f, 'del', 0), binary: get(f, 'binary') === true })),
+          insertions: dget(d, 'insertions', 0), deletions: dget(d, 'deletions', 0),
+        };
+      }
+      const pdata: Record<string, any> = {};
+      const oplats = or(get(o, 'platforms'), {});
+      for (const pid of Object.keys(oplats)) {
+        pdata[pid] = { desc: rich(get(oplats[pid], 'description')), images: (get(oplats[pid], 'images') || []).map((x: any) => img(x, pid)) };
+      }
+      return {
+        id: o.id, title: o.title, status: dget(o, 'status', 'proposed'),
+        summary: rich(get(o, 'summary')), reasoning: rich(get(o, 'reasoning')), evidence: rich(get(o, 'evidence')),
+        pros: list(get(o, 'pros')), cons: list(get(o, 'cons')),
+        scores, total: weightedTotal(criteria, raw),
+        branch: dget(o, 'branch', ''), base: dget(o, 'base', ''), head: dget(o, 'head', ''), gone: get(o, 'gone') === true,
+        diff, platforms: pdata,
+      };
+    });
+    return {
+      id: pr.id, title: pr.title, status: dget(pr, 'status', 'open'), brief: rich(get(pr, 'brief')),
+      idea: dget(pr, 'idea', ''), date: dget(pr, 'date', ''), decision: rich(get(pr, 'decision')),
+      criteria: criteria.map((c: any) => ({ id: c.id, label: c.label, weight: dget(c, 'weight', 1), desc: dget(c, 'description', '') })),
+      recommendation: rec ? { option: rec.option, html: rich(get(rec, 'reasoning')) } : null,
+      adopted: adopted ? { option: adopted.option, commit: dget(adopted, 'commit', ''), date: dget(adopted, 'date', '') } : null,
+      options,
+    };
+  });
+  return { research, ideas, proposals };
 }
 
 function checkOut(out: string, base: string, reviewPath: string, force: boolean): void {
@@ -296,6 +400,8 @@ function siteStats(site: Record<string, any>, assets: Assets): Record<string, an
     images: [...assets.files.keys()].filter((d) => d.startsWith('img/')).length,
     plan_items: site.plan.reduce((n: number, g: any) => n + g.items.length, 0),
     status: {} as Record<string, number>,
+    research: site.research.length, ideas: site.ideas.length, proposals: site.proposals.length,
+    options: site.proposals.reduce((n: number, p: any) => n + p.options.length, 0),
   };
   for (const i of counted) stats.status[i.status] = (stats.status[i.status] || 0) + 1;
   return stats;
@@ -303,8 +409,11 @@ function siteStats(site: Record<string, any>, assets: Assets): Record<string, an
 
 function statsLine(stats: Record<string, any>, assets: Stats): string {
   const st = Object.keys(stats.status).sort(cmpStr).map((k) => `${stats.status[k]} ${k}`).join(', ');
-  return `${stats.issues} issues (${st || 'none'}), ${stats.fixes} fixes with ${stats.pairs} before/after pairs, `
-    + `${stats.plan_items} plan items, ${stats.images} images `
+  const extra = [[stats.research, 'research entries'], [stats.ideas, 'ideas'], [stats.proposals, 'proposals'], [stats.options, 'options']]
+    .filter(([n]) => n).map(([n, what]) => `${n} ${what}, `).join('');
+  const head = extra && !stats.issues && !stats.fixes ? '' // an ideas or design review: no empty issue counts
+    : `${stats.issues} issues (${st || 'none'}), ${stats.fixes} fixes with ${stats.pairs} before/after pairs, `;
+  return `${head}${stats.plan_items} plan items, ${extra}${stats.images} images `
     + `(${assets.copied} copied, ${assets.resized} resized, ${assets.kept} unchanged)`;
 }
 
@@ -343,13 +452,15 @@ export function build(reviewPath: string, out: string, opts: BuildOptions = {}):
 
 // ---------------------------------------------------------------- several reviews in one site
 /** Switch labels and order for the review kinds; other kinds sort after these, labelled by their title. */
-export const KIND_ORDER = ['ui', 'backend'];
-export const KIND_LABELS: Record<string, string> = { ui: 'UI/UX', backend: 'Backend' };
-const RESERVED_KEYS = new Set(['', 'all', 'overview', 'fixes', 'issues', 'plan']);
+export const KIND_ORDER = ['ideas', 'design', 'ui', 'backend'];
+export const KIND_LABELS: Record<string, string> = { ideas: 'Ideas', design: 'Designs', ui: 'UI/UX', backend: 'Backend' };
+// View names a review key must not shadow in combined-site hashes. "ideas" is a view too, but the ideas review
+// keeps that key (its links are #/ideas/ideas/<id>).
+const RESERVED_KEYS = new Set(['', 'all', 'overview', 'fixes', 'issues', 'plan', 'research', 'proposals']);
 
 export interface ReviewRef { path: string; key: string; label: string; kind: string; data: any; base: string; warnings: string[] }
 
-/** Load and validate several reviews, order them (ui, then backend, then the rest) and give each a unique hash key. */
+/** Load and validate several reviews, order them (ideas, design, ui, backend, then the rest) and give each a unique hash key. */
 export function loadReviews(reviewPaths: string[], checkFiles = true): ReviewRef[] {
   const refs = reviewPaths.map((p) => {
     const [data, base, warnings] = loadValid(p, checkFiles, p);

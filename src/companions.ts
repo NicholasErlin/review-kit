@@ -2,8 +2,9 @@
  * Companion skills: the third-party agent skills each review kind leans on.
  *
  * A UI/UX review uses ui-ux-pro-max for its UX rules; a backend review uses a few of the backend skills from
- * wshobson/agents. Both are MIT licensed and bundled in skill/companions/ (each folder keeps its upstream LICENSE
- * and a SOURCE file with the commit it came from). `review-kit companions` reports where they are installed,
+ * wshobson/agents; a design review uses both sets and an ideas review none. They are MIT licensed and bundled in
+ * skill/companions/ (each folder keeps its upstream LICENSE and a SOURCE file with the commit it came from).
+ * `review-kit companions` reports where they are installed,
  * `review-kit companions install` links the bundled copies into skills folders, and `review-kit companions update`
  * (for maintainers) refreshes the bundle from the pinned commits.
  */
@@ -17,7 +18,7 @@ import {
   sorted, strip,
 } from './py.js';
 
-export const KINDS = ['ui', 'backend'];
+export const KINDS = ['ui', 'backend', 'ideas', 'design'];
 
 // The commits the bundle was taken from. Bump deliberately, then run `review-kit companions update`.
 export const SOURCES: Record<string, string> = {
@@ -57,7 +58,10 @@ export const COMPANIONS: Record<string, Companion[]> = {
       use: 'error propagation, failure modes, retries, graceful degradation',
     },
   ],
+  ideas: [],
+  design: [], // filled below: the UI companion for UI options, the backend ones for API/architecture options
 };
+COMPANIONS.design = [...COMPANIONS.ui, ...COMPANIONS.backend];
 
 export const BUNDLE = join(model.ROOT, 'skill', 'companions');
 export const SKIP = ['scripts/tests/']; // upstream test suites aren't needed to use the skill
@@ -165,7 +169,7 @@ function wanted(kinds: string[]): Map<string, Companion[]> {
     }
     for (const c of COMPANIONS[k]) {
       if (!out.has(c.repo)) out.set(c.repo, []);
-      out.get(c.repo)!.push(c);
+      if (!out.get(c.repo)!.some((x) => x.name === c.name)) out.get(c.repo)!.push(c); // design shares ui/backend's
     }
   }
   return out;

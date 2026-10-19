@@ -22,7 +22,16 @@ export const DEFAULT_SEVERITIES = [
 export const DEFAULT_PLATFORM = { id: 'default', label: 'All', shape: 'auto' };
 export const ISSUE_STATUSES = ['open', 'partial', 'fixed', 'notabug', 'wontfix'];
 export const PLAN_STATUSES = ['todo', 'doing', 'partial', 'done', 'dropped'];
+export const IDEA_STATUSES = ['proposed', 'go', 'maybe', 'no', 'done'];
+export const PROPOSAL_STATUSES = ['open', 'adopted', 'closed'];
+export const OPTION_STATUSES = ['proposed', 'adopted', 'rejected'];
+export const LEVELS = ['low', 'medium', 'high'];
+export const SIZES = ['S', 'M', 'L'];
+/** Proposal and option ids become branch names (design/<proposal>/<option>), so they are kept to a safe subset. */
+export const REF_ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
 export const DEFAULT_ACCENT = '#12454f';
+/** Largest diff snapshot kept for a design option (bytes); longer diffs are cut at a line break and flagged. */
+export const DIFF_CAP = 400 * 1024;
 const UMASK = process.umask();
 
 /** Parse JSON text read from a file, reporting errors the way review-kit's Python version did. */
@@ -69,7 +78,7 @@ function tempName(): string {
  * Atomic write (temp file + rename) so a crash never leaves a half-written file.
  * Keeps the mode of an existing file; new files get the usual umask-based mode, not mkstemp's 0600.
  */
-export function writeText(path: string, text: string): void {
+export function writeText(path: string, text: string | Uint8Array): void {
   const d = dirname(abspath(path));
   let mode: number;
   try {
@@ -92,7 +101,7 @@ export function writeText(path: string, text: string): void {
   }
   try {
     try {
-      fs.writeSync(fd, text);
+      fs.writeFileSync(fd, text); // writes all of it (writeSync may write part of a large buffer)
     } finally {
       fs.closeSync(fd);
     }
@@ -164,6 +173,17 @@ export function* iterImages(data: any): Generator<[string, any]> {
       }
       const imgs = get(p, 'images') || [];
       for (let i = 0; i < imgs.length; i++) yield [`fixes[${s(get(fx, 'id'))}].platforms.${pid}.images[${i}]`, imgs[i]];
+    }
+  }
+  for (const pr of get(data, 'proposals') || []) {
+    for (const o of get(pr, 'options') || []) {
+      const plats = get(o, 'platforms') || {};
+      for (const pid of Object.keys(plats)) {
+        const imgs = get(plats[pid], 'images') || [];
+        for (let i = 0; i < imgs.length; i++) {
+          yield [`proposals[${s(get(pr, 'id'))}].options[${s(get(o, 'id'))}].platforms.${pid}.images[${i}]`, imgs[i]];
+        }
+      }
     }
   }
 }

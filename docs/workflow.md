@@ -4,7 +4,7 @@ This guide is for a person or a coding agent that is working through a list of U
 
 Reviews work in two phases. First audit and report: record issues, build the site and summarise, without changing the project. Then fix only what the user approves. Steps 1, 2 and 6 are the report phase; steps 3 to 5 run only after approval.
 
-The steps below use a UI/UX review, where the evidence is screenshots. A backend review follows the same steps with code evidence instead; see [Backend reviews](#backend-reviews) at the end.
+The steps below use a UI/UX review, where the evidence is screenshots. A backend review follows the same steps with code evidence instead; see [Backend reviews](#backend-reviews). Deciding what to build, and which way, comes before any of this; see [Ideas, designs and adopting](#ideas-designs-and-adopting) at the end.
 
 ## 1. Set up
 
@@ -136,3 +136,61 @@ review-kit add-fix backend --title "Cap request bodies at 10 MB" --files app/ser
 ```
 
 Optional companion skills back each kind's checklist with rules to cite: ui-ux-pro-max for UI, and three wshobson/agents skills for backend. They ship with the kit: `review-kit companions` shows where they are, and `review-kit companions install` links them into `~/.claude/skills`.
+
+## Ideas, designs and adopting
+
+Two more kinds cover the work before a review: `ideas` decides what is worth building, and `design` decides which way to build it. Set them up with `review-kit attach --kind ideas,design`. The agent playbooks are [`ideas-review.md`](../skill/review-kit/ideas-review.md) and [`design-review.md`](../skill/review-kit/design-review.md).
+
+The flow is ideas → design → adopt → UI/backend review. Each step ends with a report, and the next one starts only when the user says so.
+
+### 1. Ideas: research, then reason
+
+1. Write the question, goal, users, constraints and what success looks like in the review description.
+2. Research first: the codebase, the project's docs and issues, official docs and standards, credible studies, and comparable products. Record each finding with at least one source a reader can open, an accessed date for web sources, a short quote or number, and a confidence. Keep facts apart from inference, record counter-evidence, and never invent a source.
+3. Generate widely, then record the strongest few ideas. Each has the problem, the proposal, the reasoning tied to research ids, the alternatives considered (including doing nothing), risks, effort, impact and confidence.
+4. Report a ranked shortlist and stop. Record the user's call per idea.
+
+```bash
+review-kit add-research ideas --title "Empty states should teach the next step" --confidence medium \
+  --summary "**Fact:** ... **Inference:** ..." --source "NN/g: Empty states=https://www.nngroup.com/articles/empty-state-interface-design/"
+review-kit add-idea ideas --title "Teach in the empty list" --evidence r-1,r-2 --effort S --impact L --confidence high \
+  --problem "..." --proposal "..." --reasoning "..." --alternatives "..." --risks "..."
+review-kit decide ideas i-1 go --note "Cheapest way to test the question"
+```
+
+### 2. Design: agree criteria, build options on branches, compare
+
+1. Write a brief for a `go` idea and agree weighted criteria with the user before building anything.
+2. For each of 2-3 genuinely different options, `option new` creates the branch `design/<proposal>/<option>` and a worktree outside the repo (`<repo>.designs/<proposal>--<option>`). Build there, minimally, and commit on that branch. The user's branch is never touched.
+3. Capture the same evidence for every option: the same screens, viewports, data and steps for UI, or the same test and benchmark commands for backend.
+4. `option record` stores the write-up, a score and note per criterion, screenshots, and a snapshot of the branch's diff in `diffs/<proposal>--<option>.patch` (capped at 400 KB).
+5. `recommend` one option, with why it wins and when another would be better. Report and stop.
+
+```bash
+review-kit add-proposal design --id first-run --title "First-run experience" --idea i-1 --brief "..." \
+  --criterion "clarity=First task without help:3" --criterion "cost=Small to build and keep:2"
+review-kit option new design first-run empty-state --title "Teaching empty state"
+# ... build and commit in the printed worktree, run the tests, take screenshots ...
+review-kit option record design first-run empty-state --summary "..." --reasoning "..." \
+  --score "clarity=4:One sentence and a visible field." --score "cost=5:Two files." \
+  --shot mobile /tmp/shots/empty-state-mobile.png "First run"
+review-kit recommend design first-run empty-state --reasoning "..."
+```
+
+The site shows each proposal as a comparison matrix (criteria by options, with notes and weighted totals out of 100), the recommendation, and the options side by side with a platform switch, their diffs, and copy buttons for `git switch` and `review-kit adopt`.
+
+### 3. Adopt, then review
+
+When the user picks an option:
+
+```bash
+review-kit adopt design first-run empty-state      # squash-merge into the current branch and commit
+review-kit discard design first-run --dry-run       # then without --dry-run, if the user agrees
+```
+
+- `adopt` runs only in the main checkout, not on a `design/*` branch, and refuses when there are uncommitted changes outside the review folders. `--no-commit` leaves the result staged; it never pushes.
+- If the branch is gone, it applies the saved diff instead. On a conflict it stops and leaves git's state; resolve it, or undo with `git reset --merge`. After resolving by hand, `adopt --record-only` records the choice.
+- `discard` removes worktrees and branches; `git worktree remove` refuses dirty worktrees unless you pass `--force`. Diffs and screenshots stay, so the site still shows every option.
+- `clean` never touches worktrees, branches or diffs.
+
+Then run a UI or backend review of the adopted change, so it gets the usual issues, fixes and before/after evidence.

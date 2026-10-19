@@ -2,12 +2,12 @@
  * Validation: a small JSON Schema interpreter (the subset review.schema.json uses) plus cross-reference checks.
  *
  * Supported keywords: type, enum, const, required, properties, additionalProperties, items,
- * minItems, minLength, maxLength, pattern, minimum, oneOf, anyOf, $ref (local #/$defs/...).
+ * minItems, minLength, maxLength, pattern, minimum, maximum, oneOf, anyOf, $ref (local #/$defs/...).
  * Unknown keywords (description, default, title, ...) are ignored.
  */
 import { ReviewError } from './errors.js';
 import * as model from './model.js';
-import { get, has, isDict, isInt, isfile, numStr, pyEq, pyLen, pySlice, repr, str, truthy, typeName } from './py.js';
+import { get, has, isabs, isDict, isInt, isfile, numStr, pyEq, pyLen, pySlice, repr, str, strip, truthy, typeName } from './py.js';
 import * as safety from './safety.js';
 
 const TYPES: Record<string, (v: unknown) => boolean> = {
@@ -71,6 +71,7 @@ export class SchemaValidator {
       if (has(s, 'pattern') && !pattern(s.pattern).test(v)) out.push(`${P(path)}: ${repr(v)} does not match ${s.pattern}`);
     }
     if (TYPES.number(v) && has(s, 'minimum') && v < s.minimum) out.push(`${P(path)}: must be >= ${numStr(s.minimum)}`);
+    if (TYPES.number(v) && has(s, 'maximum') && v > s.maximum) out.push(`${P(path)}: must be <= ${numStr(s.maximum)}`);
     if (Array.isArray(v)) {
       if (has(s, 'minItems') && v.length < s.minItems) out.push(`${P(path)}: needs at least ${numStr(s.minItems)} item(s)`);
       if (has(s, 'items')) v.forEach((x, i) => this.check(x, s.items, `${path}[${i}]`, out));
@@ -218,6 +219,7 @@ export function semantic(data: any, base: string, checkFiles = true): [string[],
       if (truthy(get(commit, 'url')) && safety.safeUrl(commit.url) !== commit.url) errors.push(`fixes[${S(fx.id)}].commits: unsafe URL`);
     }
   }
+  ideasAndDesigns(data, base, checkFiles, platOk, links, errors, warnings);
   for (const [where, link] of links) {
     const href = link.href;
     if (safety.safeUrl(href) !== href) {
@@ -239,6 +241,94 @@ export function semantic(data: any, base: string, checkFiles = true): [string[],
   else if (truthy(repo) && safety.safeUrl(repo) !== repo) errors.push('project.repo: unsafe URL');
   return [errors, warnings];
 }
+
+const blank = (v: unknown) => typeof v !== 'string' || !strip(v);
+
+/**
+ * Checks for research, ideas and proposals: cross-references and asset paths are errors; thin reasoning (no sources,
+ * no alternatives, unscored options, ...) is a warning, so weak output shows up wherever a review is validated.
+ */
+function ideasAndDesigns(data: any, base: string, checkFiles: boolean, platOk: (where: string, p: any) => void,
+  links: [string, any][], errors: string[], warnings: string[]): void {
+  const S = model.s;
+  const research: any[] = get(data, 'research') || [];
+  const ideas: any[] = get(data, 'ideas') || [];
+  const proposals: any[] = get(data, 'proposals') || [];
+  dupes(research, 'research', errors);
+  dupes(ideas, 'idea', errors);
+  dupes(proposals, 'proposal', errors);
+  const researchIds = new Set(research.map((r) => r.id));
+  for (const r of research) {
+    const w = `research[${S(r.id)}]`;
+    const sources: any[] = get(r, 'sources') || [];
+    if (!sources.length) warnings.push(`${w}: no sources; add at least one a reader can open`);
+    for (const src of sources) links.push([`${w}.sources`, src]);
+  }
+  for (const it of ideas) {
+    const w = `ideas[${S(it.id)}]`;
+    for (const e of get(it, 'evidence') || []) {
+      if (!researchIds.has(e)) errors.push(`${w}: unknown research "${S(e)}" in evidence`);
+    }
+    const missing: string[] = [];
+    if (blank(get(it, 'reasoning'))) missing.push('reasoning');
+    if (!(get(it, 'evidence') || []).length) missing.push('evidence');
+    if (blank(get(it, 'alternatives'))) missing.push('alternatives');
+    if (blank(get(it, 'risks'))) missing.push('risks');
+    if (missing.length) warnings.push(`${w}: weak reasoning; missing ${missing.join(', ')}`);
+    if (get(it, 'status') === 'go' && blank(get(it, 'decision'))) {
+      warnings.push(`${w}: status go without a decision note (record the user's call and why)`);
+    }
+  }
+  for (const pr of proposals) {
+    const w = `proposals[${S(pr.id)}]`;
+    const options: any[] = get(pr, 'options') || [];
+    const criteria: any[] = get(pr, 'criteria') || [];
+    dupes(options, `${w} option`, errors);
+    dupes(criteria, `${w} criterion`, errors);
+    const optIds = new Set(options.map((o) => o.id));
+    const critIds = new Set(criteria.map((c) => c.id));
+    for (const key of ['recommendation', 'adopted']) {
+      const ref = get(pr, key);
+      if (isDict(ref) && !optIds.has(ref.option)) errors.push(`${w}.${key}: "${S(ref.option)}" is not an option of this proposal`);
+    }
+    if (options.length < 2) warnings.push(`${w}: ${options.length} option(s); compare at least 2 genuinely different options`);
+    if (!criteria.length) warnings.push(`${w}: no criteria; agree the criteria and weights before building options`);
+    if (dget(pr, 'status', 'open') === 'open' && options.length >= 2 && !isDict(get(pr, 'recommendation'))) {
+      warnings.push(`${w}: no recommendation yet (\`review-kit recommend\`)`);
+    }
+    for (const o of options) {
+      const wo = `${w}.options[${S(o.id)}]`;
+      for (const p of Object.keys(get(o, 'platforms') || {})) platOk(wo, p);
+      const scores = get(o, 'scores') || {};
+      for (const c of Object.keys(scores)) {
+        if (!critIds.has(c)) errors.push(`${wo}: score for unknown criterion "${c}"`);
+      }
+      const unscored = criteria.map((c) => c.id).filter((c) => !has(scores, c));
+      if (unscored.length) warnings.push(`${wo}: no score for ${unscored.map(S).join(', ')}`);
+      if (blank(get(o, 'reasoning'))) warnings.push(`${wo}: no reasoning`);
+      const wt = get(o, 'worktree');
+      if (typeof wt === 'string' && (isabs(wt) || /^[A-Za-z]:[\\/]/.test(wt) || wt.startsWith('\\'))) {
+        errors.push(`${wo}.worktree: must be relative to the repository root, not an absolute path`);
+      }
+      const diff = get(o, 'diff');
+      if (isDict(diff)) {
+        const dp = diff.path;
+        if (!/\.(patch|diff)$/i.test(dp)) errors.push(`${wo}.diff: path must end in .patch or .diff`);
+        else {
+          try {
+            const target = safety.localSource(base, dp);
+            if (checkFiles && !isfile(target)) errors.push(`${wo}.diff: file not found: ${dp}`);
+          } catch (e) {
+            if (!(e instanceof ReviewError)) throw e;
+            errors.push(`${wo}.diff: ${e.message}`);
+          }
+        }
+      }
+    }
+  }
+}
+
+const dget = (d: any, k: string, def: unknown) => (has(d, k) ? d[k] : def);
 
 /** Full validation. Returns [errors, warnings]; schema errors short-circuit the semantic checks. */
 export function validate(data: unknown, base: string, checkFiles = true): [string[], string[]] {

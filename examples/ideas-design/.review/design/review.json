@@ -1,0 +1,304 @@
+{
+  "$schema": "https://raw.githubusercontent.com/NicholasErlin/review-kit/main/schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "Pocket Tasks",
+    "title": "Design proposals",
+    "kind": "design",
+    "date": "2026-10-19",
+    "description": "Options for the first-run experience, built on their own branches from the same base and compared on the same screens (412x915 phone, 1440x900 desktop, fresh browser profile).",
+    "theme": {
+      "accent": "#7a4b12"
+    },
+    "links": []
+  },
+  "platforms": [
+    {
+      "id": "mobile",
+      "label": "Mobile",
+      "shape": "portrait"
+    },
+    {
+      "id": "desktop",
+      "label": "Desktop",
+      "shape": "auto"
+    }
+  ],
+  "proposals": [
+    {
+      "id": "first-run",
+      "title": "First-run experience for new users",
+      "status": "open",
+      "idea": "i-1",
+      "date": "2026-10-19",
+      "brief": "Decide what a first-time user sees on an empty Pocket Tasks. Comes from idea *i-1* (go) and *i-3* (maybe).\n\n**Constraints:** no backend, no new dependencies, under 30 changed lines, nothing new for returning users with tasks. Every option starts from the same base commit, where a new user's list is empty.",
+      "criteria": [
+        {
+          "id": "clarity",
+          "label": "First task without help",
+          "weight": 3,
+          "description": "How clearly the screen says what to do first."
+        },
+        {
+          "id": "a11y",
+          "label": "Accessible",
+          "weight": 3,
+          "description": "WCAG 2.2 AA: labels, focus, dismissal, reflow at 320 px."
+        },
+        {
+          "id": "clean",
+          "label": "Stays out of the way",
+          "weight": 2,
+          "description": "No clutter or leftovers once the user has their own tasks."
+        },
+        {
+          "id": "cost",
+          "label": "Small to build and keep",
+          "weight": 2,
+          "description": "Changed lines, state to persist, cases to test."
+        }
+      ],
+      "recommendation": {
+        "option": "empty-state",
+        "reasoning": "It scores highest on the two heaviest criteria: the help sits in the empty list where the user is already looking (research r-1), and it is the only option that also fixes the unlabeled field. It needs no stored state, so there is nothing to get out of sync.\n\nIts weakness is that it teaches only adding a task, not ticking or deleting. Pick **sample tasks** instead if usage data later shows new users not discovering the checkbox; pick neither of the others for a coach mark, which failed on the phone screenshot."
+      },
+      "options": [
+        {
+          "id": "empty-state",
+          "title": "Teaching empty state",
+          "status": "proposed",
+          "summary": "When the list is empty, a dashed panel says *Nothing to do yet* and how to add a task. Also adds the visible **New task** label from idea i-2.",
+          "reasoning": "Help in context, driven by state rather than a stored flag: it shows exactly when the list is empty and never otherwise.",
+          "pros": [
+            "Help sits where the user looks first",
+            "No `localStorage` state",
+            "Fixes the missing label (WCAG 3.3.2)"
+          ],
+          "cons": [
+            "Teaches adding only, not ticking or deleting",
+            "Shows again whenever a user clears the list"
+          ],
+          "scores": {
+            "clarity": {
+              "score": 4,
+              "note": "Heading plus one sentence; the label names the field."
+            },
+            "a11y": {
+              "score": 5,
+              "note": "Visible label; plain text in the flow; nothing to dismiss."
+            },
+            "clean": {
+              "score": 5,
+              "note": "Gone as soon as one task exists."
+            },
+            "cost": {
+              "score": 5,
+              "note": "12 added lines, no state."
+            }
+          },
+          "evidence": "Checked in Chromium at 412x915 and 1440x900 with an empty profile: the panel renders below the form and hides after adding a task. No tests exist in this example app.",
+          "branch": "design/first-run/empty-state",
+          "base": "10386e3de4134121bc6cc35d99a0533370e50d97",
+          "head": "ecf28508177db3b94301acdb5a17d218fedf3342",
+          "diff": {
+            "path": "diffs/first-run--empty-state.patch",
+            "files": [
+              {
+                "path": "app/app.js",
+                "add": 2,
+                "del": 0
+              },
+              {
+                "path": "app/index.html",
+                "add": 5,
+                "del": 0
+              },
+              {
+                "path": "app/style.css",
+                "add": 5,
+                "del": 0
+              }
+            ],
+            "insertions": 12,
+            "deletions": 0
+          },
+          "platforms": {
+            "mobile": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--empty-state/mobile.png",
+                  "caption": "The add form is still wider than the phone (a known base issue, not this option's).",
+                  "alt": "First run on a phone, empty state option"
+                }
+              ]
+            },
+            "desktop": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--empty-state/desktop.png",
+                  "caption": "Empty list replaced by the teaching panel.",
+                  "alt": "First run on desktop, empty state option"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "sample-tasks",
+          "title": "Three sample tasks",
+          "status": "proposed",
+          "summary": "On first run the list holds three italic sample tasks whose text explains ticking, adding and deleting. A `localStorage` flag makes sure they appear once.",
+          "reasoning": "Learning by doing: the user's first tap can be ticking a sample, and they see a populated list straight away.",
+          "pros": [
+            "Teaches all three actions",
+            "Shows what a full list looks like"
+          ],
+          "cons": [
+            "The count says *3 left* for tasks the user never made",
+            "Users must delete the samples by hand",
+            "Still no label on the add field"
+          ],
+          "scores": {
+            "clarity": {
+              "score": 4,
+              "note": "Clear, but the user may not realise the tasks are examples."
+            },
+            "a11y": {
+              "score": 3,
+              "note": "Italic grey text is readable, but the unlabeled field remains."
+            },
+            "clean": {
+              "score": 2,
+              "note": "Leaves three tasks and a wrong count to clean up."
+            },
+            "cost": {
+              "score": 4,
+              "note": "10 lines plus one storage key to reason about."
+            }
+          },
+          "evidence": "Checked in Chromium with an empty profile: samples appear on the first load only; a reload shows an empty list.",
+          "branch": "design/first-run/sample-tasks",
+          "base": "10386e3de4134121bc6cc35d99a0533370e50d97",
+          "head": "45d2eb8bdcb9c025d4dffed7b4c28fd8855f89dc",
+          "diff": {
+            "path": "diffs/first-run--sample-tasks.patch",
+            "files": [
+              {
+                "path": "app/app.js",
+                "add": 9,
+                "del": 2
+              },
+              {
+                "path": "app/style.css",
+                "add": 1,
+                "del": 0
+              }
+            ],
+            "insertions": 10,
+            "deletions": 2
+          },
+          "platforms": {
+            "mobile": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--sample-tasks/mobile.png",
+                  "caption": "Samples fill the first screen; the count reads 3 left.",
+                  "alt": "First run on a phone, sample tasks option"
+                }
+              ]
+            },
+            "desktop": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--sample-tasks/desktop.png",
+                  "caption": "Samples in italics.",
+                  "alt": "First run on desktop, sample tasks option"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "coach-mark",
+          "title": "Dismissible coach mark",
+          "status": "proposed",
+          "summary": "A dark callout under the add field says *Start here* with a **Got it** button; Escape also closes it, and a `localStorage` flag keeps it closed.",
+          "reasoning": "Points straight at the one control that matters, and goes away for good once dismissed.",
+          "pros": [
+            "Points at the exact control",
+            "Closes with Escape (WCAG 1.4.13)"
+          ],
+          "cons": [
+            "On a 412 px phone the **Got it** button is pushed off screen by the fixed-width form",
+            "One more state to persist and test",
+            "Still no label on the add field"
+          ],
+          "scores": {
+            "clarity": {
+              "score": 3,
+              "note": "Clear on desktop; on the phone the close button is not visible."
+            },
+            "a11y": {
+              "score": 2,
+              "note": "Escape works, but the visible dismiss control is off screen at 412 px, and the field stays unlabeled."
+            },
+            "clean": {
+              "score": 4,
+              "note": "Gone for good after dismissal."
+            },
+            "cost": {
+              "score": 3,
+              "note": "21 lines, a storage key and a keyboard handler."
+            }
+          },
+          "evidence": "The phone screenshot shows the callout running off the right edge, taking the **Got it** button with it.",
+          "branch": "design/first-run/coach-mark",
+          "base": "10386e3de4134121bc6cc35d99a0533370e50d97",
+          "head": "0d6c18edf07164bf77312015cc35dcf1fdffe12d",
+          "diff": {
+            "path": "diffs/first-run--coach-mark.patch",
+            "files": [
+              {
+                "path": "app/app.js",
+                "add": 13,
+                "del": 1
+              },
+              {
+                "path": "app/index.html",
+                "add": 4,
+                "del": 0
+              },
+              {
+                "path": "app/style.css",
+                "add": 4,
+                "del": 0
+              }
+            ],
+            "insertions": 21,
+            "deletions": 1
+          },
+          "platforms": {
+            "mobile": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--coach-mark/mobile.png",
+                  "caption": "The Got it button is off screen on the phone.",
+                  "alt": "First run on a phone, coach mark option"
+                }
+              ]
+            },
+            "desktop": {
+              "images": [
+                {
+                  "src": "screenshots/first-run--coach-mark/desktop.png",
+                  "caption": "Callout under the add field.",
+                  "alt": "First run on desktop, coach mark option"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 ---
 name: review-kit
-description: "Use when reviewing or fixing a repo in several steps and the user wants a reviewable overview of what changed (issues found, fixes shipped with evidence, what is left): UI/UX reviews with before/after screenshots, and backend practice reviews (security, correctness, errors, API design, architecture, tests) with code and test evidence. Also use when the user asks to set up a review site, audit tracker, before/after comparison, fix log or progress overview. Also use when coordinating several fix agents whose results should be merged into one report. Records everything in a review.json and publishes an offline, phone-friendly site with review-kit. Do not use for a single small change nobody asked to document."
+description: "Use when reviewing or fixing a repo in several steps and the user wants a reviewable overview of what changed (issues found, fixes shipped with evidence, what is left): UI/UX reviews with before/after screenshots, and backend practice reviews (security, correctness, errors, API design, architecture, tests) with code and test evidence. Also use when the user asks to set up a review site, audit tracker, before/after comparison, fix log or progress overview. Also use for researched ideation (ideas with cited sources and reasoning) and design proposals (2-3 options built on their own branches, scored against agreed criteria, one adopted on the user's word). Also use when coordinating several fix agents whose results should be merged into one report. Records everything in a review.json and publishes an offline, phone-friendly site with review-kit. Do not use for a single small change nobody asked to document."
 ---
 
 # review-kit: issues, fixes and the evidence for each
@@ -23,6 +23,7 @@ A review run has two phases. Never merge them on your own.
 - A request that already asks for fixes, such as "fix the mobile layout and show me before/after", counts as approval for those fixes only. Report anything else you notice; don't fix it.
 - If you're unsure whether a fix was approved, ask.
 - After phase 1, stop and wait. A good ending is: "N issues recorded (x P0, y P1). Which should I fix?"
+- The same rule holds for ideas and designs: ideation only researches and proposes, design options are built only on their own branches, and `rk adopt` and `rk discard` run only on the user's word (see section 7).
 
 ## 0. Pick the review kind and read its playbook
 
@@ -32,16 +33,18 @@ Each review has a kind, set as `project.kind`. Missing means `ui`.
 | --- | --- | --- | --- | --- |
 | `ui` | UI/UX: accessibility, touch, layout, type, forms, navigation | before/after screenshots | `ui-review.md` | ui-ux-pro-max |
 | `backend` | Backend practices: security, correctness, errors, API design, data, architecture, tests | code, test and command output | `backend-review.md` | api-design-principles, architecture-patterns, error-handling-patterns |
+| `ideas` | Research and ideas: what to build and why | cited sources, reasoning, alternatives, risks | `ideas-review.md` | none required |
+| `design` | 2-3 options for one decision, built on their own branches and compared | criteria scores, screenshots, diffs, test output | `design-review.md` | ui-ux-pro-max for UI options; the three backend skills for API or architecture options |
 
-- Both playbooks are next to this file, in `$KIT/skill/review-kit/`. Read the one for your kind before auditing.
-- The user may want both kinds. Keep one review per kind; don't mix UI and backend issues in one review.
+- All playbooks are next to this file, in `$KIT/skill/review-kit/`. Read the one for your kind before auditing.
+- The user may want several kinds. Keep one review per kind; don't mix UI and backend issues in one review.
 - The companion skills ship with the kit in `$KIT/skill/companions/`. `rk companions` shows the copy to use: an installed one if the agent already has it, otherwise the bundled one. Read them from there even if your agent hasn't loaded them as skills.
 - Only review what the user asked for. A UI fix doesn't need a backend audit.
 
 ## 1. Set up once per project
 
 - Look for an existing review first: `.review/<kind>/review.json`, then `.review/review.json`, `docs/review/review.json`, or `review.json`. Reuse one if it exists.
-- If there is none, run `rk init .review/ui --kind ui --name "<App>" --platforms mobile,desktop` or `rk init .review/backend --kind backend --name "<App>"`. Use `--platforms web` for a single UI platform.
+- If there is none, run `rk init .review/ui --kind ui --name "<App>" --platforms mobile,desktop` or `rk init .review/backend --kind backend --name "<App>"` (likewise `--kind ideas` or `--kind design`). Use `--platforms web` for a single UI platform.
   - If the user wants the repo set up for future sessions and other agents, run `rk attach --name "<App>" --kind ui,backend` instead (pass only the kinds they want). It also adds a short review-kit pointer to the repo's `AGENTS.md`, and to `CLAUDE.md` if one exists.
   - With several reviews, pass the kind as the review argument: `rk add-issue backend ...`, `rk build ui`.
   - Use `docs/review` instead of `.review` if the user wants the reviews visible in the repo (`--dir docs/review` for attach).
@@ -100,7 +103,7 @@ This applies whenever several workers fix things at once: sub-agents, parallel s
 
 ## 6. Build, serve and report
 
-- Build: `rk build`. When the repo has both `.review/ui/` and `.review/backend/`, this writes ONE combined site at `.review/site/index.html` with a UI/UX / Backend switch and an overview of both; with one review it writes `.review/<kind>/site/`. `rk build ui` (or `backend`) builds only that review. The page also works when opened directly from disk.
+- Build: `rk build`. When the repo has several reviews (`.review/ui/`, `.review/backend/`, `.review/ideas/`, `.review/design/`), this writes ONE combined site at `.review/site/index.html` with a switch (All, Ideas, Designs, UI/UX, Backend) and an overview of them all; with one review it writes `.review/<kind>/site/`. `rk build ui` (or another kind) builds only that review. The page also works when opened directly from disk.
 - Serve, detached so it keeps running after your command returns (with both kinds it serves the combined site, and `--watch` follows both reviews):
   `nohup review-kit serve --port 8787 --watch > /tmp/review-kit.log 2>&1 & disown`
   - Then read the log and give the user the localhost URL. For a phone preview, explicitly add `--host 0.0.0.0` and give the LAN or Tailscale URL; tell the user anyone who can reach that port can read the review.
@@ -110,9 +113,21 @@ This applies whenever several workers fix things at once: sub-agents, parallel s
 - Tidy up when a round is done: `rk clean` removes the built sites (each review's `site/` and the combined `.review/site/`) and merged `pending/*.applied.json`. `rk clean --orphans --dry-run` lists screenshots nothing references anymore; drop `--dry-run` to delete them. Screenshots that unmerged `pending/*.json` files reference are kept, and `--orphans` stops without deleting anything if a pending file can't be read.
 - Report: `rk summary` prints Markdown with totals, counts by severity and platform, the latest fixes, and the most severe open items. Use it for progress updates and PR descriptions, and end with the site URL.
 
+## 7. Ideas, then designs, then adopt
+
+For "what should we build" and "which way should we build it", the flow is:
+
+1. **Ideas** (`.review/ideas/`, `ideas-review.md`). Frame the question, research with real sources (`rk add-research`), then record a few strong ideas with their reasoning, evidence, alternatives and risks (`rk add-idea`). Report a ranked shortlist and stop. Nothing is built. The user decides each idea; record it with `rk decide <idea> go|maybe|no --note "<their reason>"`.
+2. **Design** (`.review/design/`, `design-review.md`). For a `go` idea, write a brief and agree weighted criteria with the user (`rk add-proposal`). Build 2-3 different options, each on its own branch and worktree (`rk option new`), with the same screenshots or test runs for each, then record and score them (`rk option record`) and recommend one (`rk recommend`). Report and stop.
+3. **Adopt**, only when the user names an option: `rk adopt design <proposal> <option>` squash-merges that option's branch into the current branch. Then suggest a UI or backend review of the result, and offer `rk discard design <proposal>` for the other branches; run it only if the user agrees.
+
+- Never edit the user's branch while designing, and never run `adopt` or `discard` because an option looks clearly best.
+- `rk validate` and `rk build` warn about weak reasoning: research without sources, ideas without reasoning, evidence, alternatives or risks, proposals without criteria or a recommendation, and unscored options. Fix the warnings before reporting.
+- In a combined site, ideas link to their design proposals and back: `#/ideas/ideas/i-1`, `#/design/proposals/<id>/<option>`.
+
 ## Reference
 
-- Issue statuses: `open`, `partial`, `fixed`, `notabug`, `wontfix`. Plan statuses: `todo`, `doing`, `partial`, `done`, `dropped`.
+- Issue statuses: `open`, `partial`, `fixed`, `notabug`, `wontfix`. Plan statuses: `todo`, `doing`, `partial`, `done`, `dropped`. Idea statuses: `proposed`, `go`, `maybe`, `no`, `done`. Proposal statuses: `open`, `adopted`, `closed`.
 - Default severities are P0 (blocker), P1 (major) and P2 (polish). You can set custom ones under `severities`.
 - Rich-text fields are Markdown. Set `project.textFormat: "html"` for HTML. Both modes sanitize active content; use screenshot fields for images.
 - Build references must resolve inside the review folder. The CLI explicitly imports absolute raster screenshot paths. Hidden files, credentials/session filenames and active attachments such as HTML/SVG are blocked.

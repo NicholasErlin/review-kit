@@ -1,7 +1,7 @@
 /**
  * review-kit attach: set a repository up for review-kit in one step.
  *
- * Creates (or reuses) one review folder per kind (UI/UX, backend) and adds a short pointer to the repo's agent
+ * Creates (or reuses) one review folder per kind (UI/UX, backend, ideas, design) and adds a short pointer to the repo's agent
  * instructions file, so any coding agent working there knows to use the review-kit skill. The pointer sits between
  * markers and is replaced in place on later runs, so attach can be re-run safely.
  */
@@ -18,19 +18,28 @@ export const LEGACY_DIRS = ['.review', 'docs/review', 'review', '.'];
 export const KIND_DEFAULTS: Record<string, { title: string; platforms: string[]; label: string }> = {
   ui: { title: 'UI/UX review', platforms: ['mobile', 'desktop'], label: 'UI/UX' },
   backend: { title: 'Backend review', platforms: ['default'], label: 'Backend practices' },
+  ideas: { title: 'Ideas and research', platforms: ['default'], label: 'Ideas and research' },
+  design: { title: 'Design proposals', platforms: ['mobile', 'desktop'], label: 'Design proposals' },
 };
+/** Kinds whose --platforms override applies (the screen-based ones). */
+const SCREEN_KINDS = ['ui', 'design'];
+/** Pointer order: the flow runs ideas -> design -> ui/backend review. */
+const POINTER_ORDER = ['ideas', 'design', 'ui', 'backend'];
 export const KINDS = Object.keys(KIND_DEFAULTS);
 
 /** reviews: [kind, reviewRelDir][] */
 export function pointer(reviews: [string, string][]): string {
   const rows = reviews.map(([k, rel]) => `- ${KIND_DEFAULTS[k].label}: \`${rel}/review.json\``).join('\n');
+  const flow = reviews.some(([k]) => k === 'ideas' || k === 'design')
+    ? '\nIdeation only researches and proposes; design options are built on their own branches and adopted only when the\nuser picks one.\n'
+    : '';
   return `${BEGIN}
 ## Review tracking (review-kit)
 
 When reviewing or fixing this repo across several steps, record the work with review-kit: issues found, fixes
 shipped with their evidence (before/after screenshots for UI, code and test output for backend), and what is
-left. A review run only reports problems; apply fixes only for the issues the user approves. The reviews live in:
-
+left. A review run only reports problems; apply fixes only for the issues the user approves.${flow ? '' : ' The reviews live in:'}
+${flow}${flow ? '\nThe reviews live in:\n' : ''}
 ${rows}
 
 Before starting, read the review-kit skill: run \`review-kit home\` and open \`skill/review-kit/SKILL.md\` in the
@@ -103,7 +112,7 @@ export interface AttachOptions {
 /**
  * Create (or reuse) one review per kind under <directory>/<kind>/. Returns human-readable log lines.
  *
- * title and platforms override the kind's defaults (platforms only apply to UI reviews).
+ * title and platforms override the kind's defaults (platforms only apply to UI and design reviews).
  * agentFiles=null means AGENTS.md, plus CLAUDE.md when the repo already has one. Pass [] to skip.
  */
 export function attach(repo = '.', opts: AttachOptions = {}): string[] {
@@ -123,7 +132,7 @@ export function attach(repo = '.', opts: AttachOptions = {}): string[] {
     if (review) log.push(`${k}: using existing ${relpath(review, repo)}`);
     else {
       const d = KIND_DEFAULTS[k];
-      const plats = (platforms && platforms.length && k === 'ui' ? platforms : null) || d.platforms;
+      const plats = (platforms && platforms.length && SCREEN_KINDS.includes(k) ? platforms : null) || d.platforms;
       review = edit.init(join(repo, directory, k), name || basename(repo),
         (title && kinds.length === 1 ? title : null) || d.title, plats, ignoreScreenshots, accent, k);
       log.push(`${k}: created ${relpath(review, repo)} (+ screenshots/, pending/, .gitignore)`);
@@ -139,7 +148,7 @@ export function attach(repo = '.', opts: AttachOptions = {}): string[] {
     const existing = kinds.includes(k) ? null : findExisting(repo, k, directory);
     if (existing) reviews.push([k, relpath(dirname(existing), repo)]);
   }
-  reviews.sort((a, b) => KINDS.indexOf(a[0]) - KINDS.indexOf(b[0]));
+  reviews.sort((a, b) => POINTER_ORDER.indexOf(a[0]) - POINTER_ORDER.indexOf(b[0]));
   // Several reviews build into one combined site at <directory>/site/: keep it out of git too.
   if (reviews.length > 1 && edit.ignoreCombinedSite(join(repo, directory))) {
     log.push(`${relpath(join(repo, directory, '.gitignore'), repo)}: ignores the combined site/`);

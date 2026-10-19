@@ -14,6 +14,15 @@
   function dateKey(s) { var t = Date.parse(s || ''); return isNaN(t) ? 0 : t; }
   function pct(n, d) { return d ? 100 * n / d : 0; }
   function hex(c) { c = c.replace('#', ''); if (c.length === 3) c = c.replace(/./g, '$&$&'); return [0, 2, 4].map(function (i) { return parseInt(c.substr(i, 2), 16); }); }
+  var KINDS = { ui: 1, backend: 1, ideas: 1, design: 1 };
+  function kindOf(D, key) { // project.kind, else the combined-site key, else guess from the data
+    var k = D.project.kind || (KINDS[key] ? key : '');
+    if (KINDS[k]) return k;
+    if ((D.proposals || []).length && !D.issues.length) return 'design';
+    if (((D.ideas || []).length || (D.research || []).length) && !D.issues.length) return 'ideas';
+    return k || 'ui';
+  }
+  function safeHref(h) { h = String(h || ''); return /^(https?:|mailto:)/i.test(h) || !/^[a-z][a-z0-9+.-]*:/i.test(h) ? h : ''; }
   function lum(c) { return c.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce(function (a, v, i) { return a + v * [0.2126, 0.7152, 0.0722][i]; }, 0); }
 
   // ------------------------------------------------------------ one review
@@ -40,6 +49,14 @@
       it.idx = i; BYID[it.id] = it;
       it.search = [it.id, it.title, plain(it.html), plain(it.note), plain(it.where), areaTitle(it), (it.tags || []).join(' ')].join(' ').toLowerCase();
     });
+    // ideas / research / design proposals (optional sections; older data.js has none of them)
+    var RESEARCH = D.research || [], IDEAS = D.ideas || [], PROPS = D.proposals || [];
+    var KIND = kindOf(D, key);
+    var RES = {}; RESEARCH.forEach(function (r, i) { r.idx = i; RES[r.id] = r; });
+    var IDEA = {}; IDEAS.forEach(function (x, i) { x.idx = i; IDEA[x.id] = x; });
+    var PROP = {}; PROPS.forEach(function (x) { PROP[x.id] = x; });
+    var ISNAME = D.ideaStatusLabels || { proposed: 'Proposed', go: 'Go', maybe: 'Maybe', no: 'No', done: 'Done' };
+    var PSNAME = D.proposalStatusLabels || { open: 'Open', adopted: 'Adopted', closed: 'Closed' };
     var USED_ST = STATUS.filter(function (s) { return s === 'open' || s === 'partial' || s === 'fixed' || ALL.some(function (it) { return it.status === s; }); });
     var HAS_UNRANKED = ALL.some(function (it) { return !it.sev; });
     var HAS_SUMMARY = ALL.some(function (it) { return !it.counted; });
@@ -52,7 +69,7 @@
     function plTag(p) { return MULTI ? '<span class="badge-pl">' + esc((PL[p] || { label: p }).label).toUpperCase() + '</span>' : ''; }
     function areaTitle(it) { var a = AREA[it.area]; return a ? (a.num ? a.num + '. ' : '') + a.title : (it.area || ''); }
     function seg(name, opts, cur, cls) {
-      var label = { plat: 'Platform', mode: 'Comparison view' }[name] || name;
+      var label = { plat: 'Platform', mode: 'Comparison view', sort: 'Sort ideas by' }[name] || name;
       return '<div class="seg ' + (cls || '') + '" data-seg="' + name + '" role="group" aria-label="' + label + '">' + opts.map(function (o) {
         return '<button type="button" data-v="' + esc(o[0]) + '"' + (o[0] === cur ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + (o[2] ? ' disabled' : '') + '>' + esc(o[1]) + '</button>';
       }).join('') + '</div>';
@@ -91,8 +108,14 @@
     }
 
     // ------------------------------------------------------------ tabs / routing
-    var VIEWS = [['overview', 'Overview', '◎'], ['fixes', 'Fixes', '✓'], ['issues', 'Issues', '☰'], ['plan', 'Plan', '▤']].filter(function (v) {
-      return v[0] === 'overview' || (v[0] === 'fixes' && D.fixes.length) || (v[0] === 'issues' && ALL.length) || (v[0] === 'plan' && (D.plan.length || D.appendix.length));
+    // the kind decides the order: an ideas review leads with Ideas and Research, a design review with Proposals
+    var ORDER = KIND === 'ideas' ? ['overview', 'ideas', 'research', 'proposals', 'fixes', 'issues', 'plan']
+      : KIND === 'design' ? ['overview', 'proposals', 'ideas', 'research', 'fixes', 'issues', 'plan']
+        : ['overview', 'fixes', 'issues', 'ideas', 'research', 'proposals', 'plan'];
+    var VDEF = { overview: ['Overview', '◎'], fixes: ['Fixes', '✓'], issues: ['Issues', '☰'], plan: ['Plan', '▤'], ideas: ['Ideas', '✦'], research: ['Research', '❞'], proposals: ['Proposals', '⇆'] };
+    var VIEWS = ORDER.map(function (v) { return [v, VDEF[v][0], VDEF[v][1]]; }).filter(function (v) {
+      return v[0] === 'overview' || (v[0] === 'fixes' && D.fixes.length) || (v[0] === 'issues' && ALL.length) || (v[0] === 'plan' && (D.plan.length || D.appendix.length)) ||
+        (v[0] === 'ideas' && IDEAS.length) || (v[0] === 'research' && RESEARCH.length) || (v[0] === 'proposals' && PROPS.length);
     });
     function renderTabs(cur) {
       function link(v, ic) { return '<a href="' + H + v[0] + '"' + (v[0] === cur ? ' class="on" aria-current="page"' : '') + '>' + (ic ? '<span class="ic" aria-hidden="true">' + v[2] + '</span>' : '') + v[1] + '</a>'; }
@@ -104,7 +127,7 @@
       current = view;
       document.body.classList.toggle('no-bottom', VIEWS.length < 2);
       renderTabs(view);
-      ({ overview: viewOverview, fixes: viewFixes, issues: viewIssues, plan: viewPlan })[view](parts.slice(1).map(decodeURIComponent));
+      ({ overview: viewOverview, fixes: viewFixes, issues: viewIssues, plan: viewPlan, ideas: viewIdeas, research: viewResearch, proposals: viewProposals })[view](parts.slice(1).map(decodeURIComponent));
     }
 
     // ------------------------------------------------------------ overview
@@ -154,6 +177,14 @@
         return '<span><i' + x[3] + ' style="background:' + x[1] + '"></i>' + x[2] + '</span>';
       }).join('') + '</div>';
     }
+    function planCard() {
+      var items = [];
+      D.plan.forEach(function (g) { items = items.concat(g.items); });
+      if (!items.length) return '';
+      var pc = planCounts(items);
+      return '<section class="card"><h2>Plan</h2><div class="small">' + planSummary(pc) + '</div><div style="margin:10px 0">' + bar(pc) + planLegend(pc) +
+        '</div><a class="btn" href="' + H + 'plan">Open the plan</a></section>';
+    }
     function issueRow(it) {
       return '<li class="toprow">' + sevTag(it.sev) + '<div class="t"><a class="row" href="' + H + 'issues/' + encodeURIComponent(it.id) + '"><div class="lf-title' + (RESOLVED[it.status] ? ' struck' : '') + '">' + esc(it.title) + '</div></a><div class="lf-meta">' + stTag(it.status) + ' ' + plTag(it.platform) + (areaTitle(it) ? ' · ' + esc(areaTitle(it)) : '') + '</div></div></li>';
     }
@@ -162,6 +193,14 @@
     function viewOverview() {
       var counted = ALL.filter(function (it) { return it.counted; });
       var html = '<h1 class="view-title">Overview</h1>' + (P.desc ? '<div class="intro">' + P.desc + '</div>' : '');
+      var think = thinkCards(), thinking = KIND === 'ideas' || KIND === 'design';
+      if (thinking) html += think;
+      if (thinking && !counted.length && !D.fixes.length) { // an ideas / design review with no issues: no issue progress to show
+        html += planCard();
+        app.innerHTML = html;
+        linkRefs(app.querySelector('.intro'), key);
+        return;
+      }
       var meta = [counted.length + ' issue' + (counted.length === 1 ? '' : 's') + (MULTI ? ' across ' + PLATS.length + ' platforms' : ''), D.fixes.length + ' fix' + (D.fixes.length === 1 ? '' : 'es')];
       if (P.date) meta.push('review date ' + esc(P.date));
       meta.push('updated ' + esc(D.generated));
@@ -200,16 +239,10 @@
         return top.length ? '<section class="card"><h2>' + (MULTI ? esc(PL[p].label) + ': top' : 'Top') + ' issues, ranked</h2><ul class="list">' + top.map(issueRow).join('') + '</ul></section>' : '';
       }).filter(Boolean);
       if (tops.length) html += tops.length > 1 ? '<div class="grid2">' + tops.join('') + '</div>' : tops[0];
-      if (D.plan.length) {
-        var items = [];
-        D.plan.forEach(function (g) { items = items.concat(g.items); });
-        if (items.length) {
-          var pc = planCounts(items);
-          html += '<section class="card"><h2>Plan</h2><div class="small">' + planSummary(pc) + '</div><div style="margin:10px 0">' + bar(pc) + planLegend(pc) +
-            '</div><a class="btn" href="' + H + 'plan">Open the plan</a></section>';
-        }
-      }
+      if (!thinking) html += think;
+      html += planCard();
       app.innerHTML = html;
+      linkRefs(app.querySelector('.intro'), key);
       app.querySelectorAll('[data-goto-plat]').forEach(function (a) {
         a.addEventListener('click', function () { var f = loadFilters(); f.plat = a.getAttribute('data-goto-plat'); store('filters', f); });
       });
@@ -556,10 +589,429 @@
       });
     }
 
+    // ------------------------------------------------------------ ideas, research, design proposals
+    var SIZE = { S: 'small', M: 'medium', L: 'large' };
+    var SIZE_N = { S: 1, M: 2, L: 3 };
+    var CONF_N = { low: 1, medium: 2, high: 3 };
+    var ISTATUS = ['proposed', 'go', 'maybe', 'no', 'done'];
+    function cap1(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
+    function iTag(st) { return '<span class="st st-i-' + esc(st) + '">' + esc(ISNAME[st] || st) + '</span>'; }
+    function pTag(st) { return '<span class="st st-p-' + esc(st) + '">' + esc(PSNAME[st] || st) + '</span>'; }
+    function confTag(c) { return c ? '<span class="badge conf-' + esc(c) + '">' + esc(cap1(c)) + ' confidence</span>' : ''; }
+    function sizeTag(k, v) { return v ? '<span class="badge">' + k + ' ' + esc(SIZE[v] || v) + '</span>' : ''; }
+    function given(html) { return !!html && !!plain(html).trim(); }
+    function missing(what) { return '<p class="missing">' + esc(what || 'Not given') + '</p>'; }
+    function orMissing(html, what) { return given(html) ? '<div class="rich">' + html + '</div>' : missing(what); }
+    function sec(title, body) { return '<section class="card isec"><h2>' + title + '</h2>' + body + '</section>'; }
+    function clip(s, n) { s = s.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s; }
+    function byRank(a, b) { return (a.rank == null ? 1e9 : a.rank) - (b.rank == null ? 1e9 : b.rank) || a.idx - b.idx; }
+    function ideaMeta(x) { return [x.impact ? 'Impact ' + (SIZE[x.impact] || x.impact) : '', x.effort ? 'Effort ' + (SIZE[x.effort] || x.effort) : '', x.confidence ? cap1(x.confidence) + ' confidence' : ''].filter(Boolean).map(esc).join(' · '); }
+    function ideaChip(id) { // ideas may live in another review of a combined site
+      var f = findIn('ideas', id, key);
+      if (!f) return '<span class="ichip"><span class="t">' + esc(id) + '</span></span>';
+      return '<a class="ichip" href="' + f.h + 'ideas/' + encodeURIComponent(id) + '">' + iTag(f.x.status) + '<span class="t">' + esc(f.x.title) + '</span></a>';
+    }
+    function propChip(id) {
+      var f = findIn('proposals', id, key);
+      if (!f) return '<span class="ichip"><span class="t">' + esc(id) + '</span></span>';
+      return '<a class="ichip" href="' + f.h + 'proposals/' + encodeURIComponent(id) + '">' + pTag(f.x.status) + '<span class="t">' + esc(f.x.title) + '</span></a>';
+    }
+    function proscons(pros, cons) {
+      function ul(l, cls, none) { return l && l.length ? '<ul class="' + cls + '">' + l.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' : missing(none); }
+      return '<div class="pc"><div><h3>Pros</h3>' + ul(pros, 'pros', 'None listed') + '</div><div><h3>Cons</h3>' + ul(cons, 'cons', 'None listed') + '</div></div>';
+    }
+    function tiles(list) { return '<div class="stats">' + list.map(function (t) { return '<div class="stat ' + t[2] + '"><b>' + t[0] + '</b><span>' + esc(t[1]) + '</span></div>'; }).join('') + '</div>'; }
+    function ideaCounts() { var n = {}; ISTATUS.forEach(function (s) { n[s] = 0; }); IDEAS.forEach(function (x) { n[x.status] = (n[x.status] || 0) + 1; }); return n; }
+    function optTitle(p, id) { for (var i = 0; i < p.options.length; i++) if (p.options[i].id === id) return p.options[i].title; return id; }
+    function propLine(p) {
+      var bits = [p.options.length + ' option' + (p.options.length === 1 ? '' : 's')];
+      if (p.adopted) bits.push('Adopted: ' + esc(optTitle(p, p.adopted.option)));
+      else if (p.recommendation) bits.push('Recommended: ' + esc(optTitle(p, p.recommendation.option)));
+      else if (p.status === 'open' && p.options.length > 1) bits.push('no recommendation yet');
+      return bits.join(' · ');
+    }
+    function ideaRow(x) {
+      return '<li class="toprow">' + iTag(x.status) + '<div class="t"><a class="row" href="' + H + 'ideas/' + encodeURIComponent(x.id) + '"><div class="lf-title">' + esc(x.title) + '</div></a><div class="lf-meta">' + (ideaMeta(x) || 'Not sized') + '</div></div></li>';
+    }
+    function propRow(p) {
+      return '<li class="toprow">' + pTag(p.status) + '<div class="t"><a class="row" href="' + H + 'proposals/' + encodeURIComponent(p.id) + '"><div class="lf-title">' + esc(p.title) + '</div></a><div class="lf-meta">' + propLine(p) + '</div></div></li>';
+    }
+    function thinkCards() { // overview cards for ideas, research and proposals
+      var out = [];
+      if (IDEAS.length) {
+        var n = ideaCounts();
+        var go = IDEAS.filter(function (x) { return x.status === 'go'; }).sort(byRank);
+        var rest = [n.no ? n.no + ' no' : '', n.done ? n.done + ' done' : ''].filter(Boolean).join(' · ');
+        out.push('<section class="card"><h2>Ideas</h2><div class="small">' + IDEAS.length + ' idea' + (IDEAS.length === 1 ? '' : 's') + ' · ' + RESEARCH.length + ' research finding' + (RESEARCH.length === 1 ? '' : 's') + (rest ? ' · ' + rest : '') + '</div>' +
+          tiles([[n.go, 'Go', 'fixed'], [n.maybe, 'Maybe', 'partial'], [n.proposed, 'Proposed', 'open']]) +
+          (go.length ? '<h3>Taken forward</h3><ul class="list">' + go.map(ideaRow).join('') + '</ul>' : '<p class="small">No idea has a go yet. Open them and decide which to take forward.</p>') +
+          '<div class="rv-go"><a class="btn" href="' + H + 'ideas">All ideas</a>' + (RESEARCH.length ? '<a class="btn" href="' + H + 'research">Research</a>' : '') + '</div></section>');
+      } else if (RESEARCH.length) {
+        out.push('<section class="card"><h2>Research</h2><div class="small">' + RESEARCH.length + ' findings</div><div class="rv-go"><a class="btn" href="' + H + 'research">Open the research</a></div></section>');
+      }
+      if (PROPS.length) {
+        var open = PROPS.filter(function (p) { return p.status === 'open'; });
+        var nOpt = PROPS.reduce(function (a, p) { return a + p.options.length; }, 0);
+        out.push('<section class="card"><h2>Design proposals</h2><div class="small">' + PROPS.length + ' proposal' + (PROPS.length === 1 ? '' : 's') + ' · ' + nOpt + ' options · ' + open.length + ' waiting for a decision</div>' +
+          '<ul class="list" style="margin-top:8px">' + PROPS.map(propRow).join('') + '</ul></section>');
+      }
+      return out.length > 1 ? '<div class="grid2">' + out.join('') + '</div>' : out.join('');
+    }
+
+    // ideas list: status chips, sort, and an impact vs effort grid
+    function viewIdeas(args) {
+      if (args[0] && IDEA[args[0]]) return ideaDetail(IDEA[args[0]]);
+      var f = store('ideaFilters') || {};
+      if (!f.st) f.st = [];
+      if (!f.sort) f.sort = 'rank';
+      var n = ideaCounts();
+      app.innerHTML = '<h1 class="view-title">Ideas <span class="small">' + IDEAS.length + ' · ' + n.go + ' go</span></h1>' +
+        '<div class="filters icontrols"><div class="frow" role="group" aria-labelledby="ik-st"><span class="k" id="ik-st">Status</span>' +
+        chips('st', ISTATUS.map(function (s) { return [s, (ISNAME[s] || s) + ' ' + n[s], 'st-chip-i-' + s]; }), f.st, true) + '</div>' +
+        '<div class="frow"><span class="k" id="ik-sort">Sort by</span>' + seg('sort', [['rank', 'Rank'], ['impact', 'Impact'], ['effort', 'Effort'], ['confidence', 'Confidence']], f.sort) + '</div></div>' +
+        '<div id="imatrix"></div><div class="resinfo"><span id="icount" aria-live="polite"></span><button type="button" class="linkbtn" id="ireset">Show all</button></div><div id="idlist"></div>';
+      function sorter(a, b) {
+        if (f.sort === 'impact') return (SIZE_N[b.impact] || 0) - (SIZE_N[a.impact] || 0) || (SIZE_N[a.effort] || 9) - (SIZE_N[b.effort] || 9) || byRank(a, b);
+        if (f.sort === 'effort') return (SIZE_N[a.effort] || 9) - (SIZE_N[b.effort] || 9) || (SIZE_N[b.impact] || 0) - (SIZE_N[a.impact] || 0) || byRank(a, b);
+        if (f.sort === 'confidence') return (CONF_N[b.confidence] || 0) - (CONF_N[a.confidence] || 0) || byRank(a, b);
+        return byRank(a, b);
+      }
+      function render() {
+        var items = IDEAS.filter(function (x) { return !f.st.length || f.st.indexOf(x.status) >= 0; }).sort(sorter);
+        document.getElementById('icount').textContent = items.length + ' of ' + IDEAS.length + ' ideas';
+        document.getElementById('imatrix').innerHTML = matrixHtml(items);
+        document.getElementById('idlist').innerHTML = items.length ? items.map(ideaCard).join('') : '<div class="empty">No ideas with this status.</div>';
+      }
+      app.querySelector('.icontrols').addEventListener('click', function (e) {
+        var b = e.target.closest('[data-f]');
+        if (b) {
+          var v = b.getAttribute('data-v'), i = f.st.indexOf(v);
+          if (i >= 0) f.st.splice(i, 1); else f.st.push(v);
+          b.classList.toggle('on'); b.setAttribute('aria-pressed', b.classList.contains('on'));
+        } else {
+          var s = e.target.closest('[data-seg=sort] button'); if (!s) return;
+          f.sort = s.getAttribute('data-v');
+          s.parentNode.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === s); x.setAttribute('aria-pressed', x === s); });
+        }
+        store('ideaFilters', f); render();
+      });
+      document.getElementById('ireset').addEventListener('click', function () { f = { st: [], sort: 'rank' }; store('ideaFilters', f); viewIdeas([]); });
+      render();
+    }
+    function matrixHtml(items) {
+      var sized = items.filter(function (x) { return SIZE_N[x.impact] && SIZE_N[x.effort]; });
+      var unsized = items.filter(function (x) { return !(SIZE_N[x.impact] && SIZE_N[x.effort]); });
+      if (!sized.length && !unsized.length) return '';
+      function link(x) { return '<a class="mx-i" href="' + H + 'ideas/' + encodeURIComponent(x.id) + '">' + esc(x.title) + ' <span class="mx-st">' + esc(ISNAME[x.status] || x.status) + '</span></a>'; }
+      var rows = ['L', 'M', 'S'].map(function (imp) {
+        return '<tr><th scope="row">' + cap1(SIZE[imp]) + '</th>' + ['S', 'M', 'L'].map(function (eff) {
+          var cell = sized.filter(function (x) { return x.impact === imp && x.effort === eff; });
+          var qw = imp === 'L' && eff === 'S' ? ' qw' : '';
+          return '<td class="c-' + imp + eff + qw + '">' + (cell.length ? cell.map(link).join('') : '<span class="mx-none" aria-label="none">·</span>') + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+      return '<section class="card"><h2>Impact vs effort</h2><p class="small">Rows are impact, columns are effort. The top-left cell (large impact, small effort) holds the quick wins.</p>' +
+        '<div class="mx-scroll" role="region" aria-label="Impact versus effort grid" tabindex="0"><table class="imx"><thead><tr><td></td><th colspan="3" class="axis">Effort →</th></tr><tr><td class="corner">Impact ↓</td><th scope="col">Small</th><th scope="col">Medium</th><th scope="col">Large</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (unsized.length ? '<p class="small">Not sized: ' + unsized.map(function (x) { return '<a href="' + H + 'ideas/' + encodeURIComponent(x.id) + '">' + esc(x.title) + '</a>'; }).join(', ') + '</p>' : '') + '</section>';
+    }
+    function weakParts(x) {
+      return [['reasoning', 'reasoning'], ['alternatives', 'alternatives'], ['risks', 'risks']].filter(function (k) { return !given(x[k[0]]); }).map(function (k) { return k[1]; })
+        .concat(x.evidence && x.evidence.length ? [] : ['evidence']);
+    }
+    function ideaCard(x) {
+      var weak = weakParts(x);
+      return '<article class="card icard s-i-' + esc(x.status) + '"><div class="tags">' + iTag(x.status) + (x.rank != null ? '<span class="badge">#' + esc(x.rank) + '</span>' : '') + sizeTag('Impact', x.impact) + sizeTag('Effort', x.effort) + confTag(x.confidence) + '</div>' +
+        '<h2><a href="' + H + 'ideas/' + encodeURIComponent(x.id) + '">' + esc(x.title) + '</a></h2>' +
+        (given(x.problem) ? '<p class="ic-p">' + esc(clip(plain(x.problem), 200)) + '</p>' : '') +
+        '<div class="lf-meta">' + [x.evidence.length ? x.evidence.length + ' research finding' + (x.evidence.length === 1 ? '' : 's') + ' cited' : '',
+          weak.length ? '<span class="weak">Not given: ' + esc(weak.join(', ')) + '</span>' : ''].filter(Boolean).join(' · ') + '</div></article>';
+    }
+    function ideaDetail(x) {
+      var ev = (x.evidence || []).map(function (id) { return RES[id]; }).filter(Boolean);
+      var props = x.proposals || [];
+      app.innerHTML = '<p class="back"><a href="' + H + 'ideas">‹ All ideas</a></p><h1 class="view-title">' + esc(x.title) + '</h1>' +
+        '<div class="tags dtags">' + iTag(x.status) + (x.rank != null ? '<span class="badge">Rank #' + esc(x.rank) + '</span>' : '') + sizeTag('Impact', x.impact) + sizeTag('Effort', x.effort) + confTag(x.confidence) +
+        (x.tags || []).map(function (t) { return '<span class="badge">' + esc(t) + '</span>'; }).join('') + (x.date ? '<span class="small">' + esc(x.date) + '</span>' : '') + '</div>' +
+        sec('Problem', orMissing(x.problem)) + sec('Proposal', orMissing(x.proposal)) + sec('Why this', orMissing(x.reasoning)) +
+        sec('Evidence', ev.length ? '<div class="rlist">' + ev.map(function (r) { return researchCard(r, true); }).join('') + '</div>' : missing('No research cited')) +
+        sec('Alternatives considered', orMissing(x.alternatives)) + sec('Risks', orMissing(x.risks)) +
+        sec('Pros and cons', proscons(x.pros, x.cons)) +
+        sec('Decision', orMissing(x.decision, x.status === 'proposed' ? 'Not decided yet' : 'No note on the decision')) +
+        (props.length || x.status === 'go' ? sec('Design proposals', props.length ? '<div class="chips-l">' + props.map(propChip).join('') + '</div>' : missing('No design proposal yet')) : '');
+      linkRefs(app, key);
+    }
+
+    // research
+    function sourceHtml(s) {
+      var h = safeHref(s.href), ext = /^https?:/i.test(h);
+      var label = h ? '<a href="' + esc(h) + '"' + (ext ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + esc(s.label || s.href) + '</a>' : esc(s.label || s.href);
+      var meta = [s.kind ? esc(s.kind) : '', s.accessed ? 'accessed <span class="nw">' + esc(s.accessed) + '</span>' : '', ext ? esc(h.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0]) : ''].filter(Boolean).join(' · ');
+      return '<li>' + label + (meta ? ' <span class="small">' + meta + '</span>' : '') + (s.quote ? '<blockquote>' + esc(s.quote) + '</blockquote>' : '') + '</li>';
+    }
+    function researchCard(r, inner) {
+      var hN = inner ? 'h3' : 'h2';
+      var title = inner ? '<a href="' + H + 'research/' + encodeURIComponent(r.id) + '">' + esc(r.title) + '</a>' : esc(r.title);
+      var cited = (r.ideas || []);
+      return '<article class="' + (inner ? 'rcard inner' : 'card rcard') + '" id="' + (inner ? '' : 'res-' + esc(r.id)) + '">' +
+        '<' + hN + ' tabindex="-1">' + title + '</' + hN + '><div class="tags">' + confTag(r.confidence) + (r.tags || []).map(function (t) { return '<span class="badge">' + esc(t) + '</span>'; }).join('') + (r.date ? '<span class="small">' + esc(r.date) + '</span>' : '') + '</div>' +
+        orMissing(r.html, 'No summary') +
+        '<div class="src-k">Sources</div>' + (r.sources && r.sources.length ? '<ol class="sources">' + r.sources.map(sourceHtml).join('') + '</ol>' : missing('No sources given')) +
+        (!inner && cited.length ? '<div class="resolves citedby">Cited by ' + cited.map(ideaChip).join('') + '</div>' : '') + '</article>';
+    }
+    function viewResearch(args) {
+      var conf = { high: 0, medium: 0, low: 0 };
+      RESEARCH.forEach(function (r) { if (conf[r.confidence] != null) conf[r.confidence]++; });
+      var nsrc = RESEARCH.reduce(function (a, r) { return a + (r.sources || []).length; }, 0);
+      app.innerHTML = '<h1 class="view-title">Research <span class="small">' + RESEARCH.length + ' findings · ' + nsrc + ' sources</span></h1>' +
+        '<p class="intro">' + ['high', 'medium', 'low'].filter(function (c) { return conf[c]; }).map(function (c) { return conf[c] + ' ' + c + ' confidence'; }).join(' · ') + '</p>' +
+        RESEARCH.map(function (r) { return researchCard(r, false); }).join('');
+      linkRefs(app, key);
+      if (args[0] && RES[args[0]]) {
+        var c = document.getElementById('res-' + args[0]);
+        c.classList.add('hl');
+        setTimeout(function () { c.scrollIntoView({ block: 'start' }); c.querySelector('h2').focus({ preventScroll: true }); }, 30);
+      }
+    }
+
+    // proposals
+    function viewProposals(args) {
+      if (args[0] && PROP[args[0]]) return proposalDetail(PROP[args[0]], args[1]);
+      app.innerHTML = '<h1 class="view-title">Design proposals <span class="small">' + PROPS.length + '</span></h1>' + PROPS.map(function (p) {
+        return '<article class="card icard"><div class="tags">' + pTag(p.status) + (p.date ? '<span class="small">' + esc(p.date) + '</span>' : '') + '</div>' +
+          '<h2><a href="' + H + 'proposals/' + encodeURIComponent(p.id) + '">' + esc(p.title) + '</a></h2>' +
+          (given(p.brief) ? '<p class="ic-p">' + esc(clip(plain(p.brief), 220)) + '</p>' : '') + '<div class="lf-meta">' + propLine(p) + '</div></article>';
+      }).join('');
+    }
+    function totalOf(p, o) {
+      if (o.total != null) return o.total;
+      var w = 0, t = 0;
+      p.criteria.forEach(function (c) { var wt = c.weight || 1, s = o.scores && o.scores[c.id]; w += 5 * wt; t += (s ? s.score : 0) * wt; });
+      return w ? Math.round(100 * t / w) : null;
+    }
+    function dots(n) { var s = ''; for (var i = 1; i <= 5; i++) s += i <= n ? '●' : '○'; return '<span class="dots" aria-hidden="true">' + s + '</span>'; }
+    function optBadges(p, o) {
+      var rec = p.recommendation && p.recommendation.option === o.id;
+      return (o.status === 'adopted' ? '<span class="obadge ad">Adopted</span>' : '') + (rec ? '<span class="obadge rec">Recommended</span>' : '') +
+        (o.status === 'rejected' ? '<span class="obadge rej">Rejected</span>' : '') + (o.status !== 'adopted' && o.status !== 'rejected' && !rec ? '<span class="obadge">Proposed</span>' : '');
+    }
+    function optHref(p, o) { return H + 'proposals/' + encodeURIComponent(p.id) + '/' + encodeURIComponent(o.id); }
+    function compareHtml(p) {
+      var opts = p.options;
+      if (!p.criteria.length) return missing('No criteria agreed for this proposal, so the options are not scored.');
+      var tot = opts.map(function (o) { return totalOf(p, o); });
+      var best = Math.max.apply(null, tot.filter(function (t) { return t != null; }).concat([-1]));
+      var head = '<tr><th scope="col" class="cr">Criterion <span class="small">(weight)</span></th>' + opts.map(function (o) {
+        return '<th scope="col"><a href="' + optHref(p, o) + '">' + esc(o.title) + '</a><div class="ob">' + optBadges(p, o) + '</div></th>';
+      }).join('') + '</tr>';
+      var body = p.criteria.map(function (c) {
+        return '<tr><th scope="row" class="cr">' + esc(c.label) + ' <span class="w" title="weight">×' + esc(c.weight || 1) + '</span>' + (c.desc ? '<div class="small">' + esc(c.desc) + '</div>' : '') + '</th>' + opts.map(function (o) {
+          var s = o.scores && o.scores[c.id];
+          if (!s) return '<td class="nos"><span class="missing-i">Not scored</span></td>';
+          var face = '<span class="sc">' + esc(s.score) + '</span><span class="of">/5</span>' + dots(s.score);
+          return '<td class="s' + esc(s.score) + '">' + (given(s.note) ? '<details class="sn"><summary>' + face + '<span class="sr"> (note)</span></summary><div class="note">' + s.note + '</div></details>' : '<div class="sn0">' + face + '</div>') + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+      var foot = '<tr class="tot"><th scope="row" class="cr">Weighted total <span class="small">out of 100</span></th>' + tot.map(function (t) {
+        return '<td' + (t === best && t != null ? ' class="best"' : '') + '><b>' + (t == null ? '—' : esc(t)) + '</b>' + (t === best && t != null && opts.length > 1 ? ' <span class="obadge hi">Highest</span>' : '') + '</td>';
+      }).join('') + '</tr>';
+      var notes = p.options.some(function (o) { return p.criteria.some(function (c) { var s = o.scores && o.scores[c.id]; return s && given(s.note); }); });
+      return '<div class="mx-scroll" role="region" aria-label="Comparison matrix" tabindex="0"><table class="cmx" style="--n:' + opts.length + '"><thead>' + head + '</thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
+        (p.criteria.some(function (c) { return c.desc; }) ? '<ul class="crit-m">' + p.criteria.filter(function (c) { return c.desc; }).map(function (c) { return '<li><b>' + esc(c.label) + ':</b> ' + esc(c.desc) + '</li>'; }).join('') + '</ul>' : '') +
+        (notes ? '<button type="button" class="linkbtn" id="mx-notes" aria-pressed="false">Show all score notes</button>' : '');
+    }
+    function optShots(o, plat) {
+      var d = o.platforms && o.platforms[plat];
+      if (!d) return '<p class="noshot">No ' + esc(PL[plat] ? PL[plat].label.toLowerCase() : plat) + ' screenshots for this option.</p>';
+      return (d.desc ? '<div class="small">' + d.desc + '</div>' : '') + d.images.map(function (f) { return figHtml(f, '', ''); }).join('');
+    }
+    function cmdHtml(label, cmd) {
+      return '<div class="cmd"><div class="k">' + esc(label) + '</div><div class="cmd-row"><code>' + esc(cmd) + '</code><button type="button" class="btn copy" data-copy="' + esc(cmd) + '" aria-label="Copy: ' + esc(cmd) + '">Copy</button></div></div>';
+    }
+    function optionCard(p, o, plat, plats) {
+      var adopted = !!p.adopted || p.status === 'adopted';
+      var d = o.diff, t = totalOf(p, o);
+      var branch = o.branch || 'design/' + p.id + '/' + o.id;
+      var cmds = (!o.gone ? cmdHtml('Look at it locally', 'git switch ' + branch) : '<p class="small">The branch was discarded. The diff and screenshots above are the saved snapshot.</p>') +
+        (!adopted ? cmdHtml('Adopt this option', 'review-kit adopt ' + (KINDS[key] ? key + ' ' : '') + p.id + ' ' + o.id) : '');
+      return '<article class="card opt' + (o.status === 'adopted' ? ' s-ad' : '') + (p.recommendation && p.recommendation.option === o.id ? ' s-rec' : '') + (o.status === 'rejected' ? ' s-rej' : '') + '" id="opt-' + esc(o.id) + '" data-o="' + esc(o.id) + '">' +
+        '<div class="ob">' + optBadges(p, o) + (t != null && p.criteria.length ? '<span class="otot">' + esc(t) + ' / 100</span>' : '') + '</div>' +
+        '<h3 tabindex="-1">' + esc(o.title) + '</h3>' +
+        (plats.length ? '<div class="oshots">' + optShots(o, plat) + '</div>' : '') +
+        '<h4>Summary</h4>' + orMissing(o.summary) + '<h4>Why</h4>' + orMissing(o.reasoning) +
+        proscons(o.pros, o.cons).replace(/<h3>/g, '<h4>').replace(/<\/h3>/g, '</h4>') +
+        (given(o.evidence) ? '<h4>Evidence</h4><div class="rich ev">' + o.evidence + '</div>' : '') +
+        '<h4>Changes</h4>' + (d ? '<p class="small">' + d.files.length + ' file' + (d.files.length === 1 ? '' : 's') + ' · <span class="add">+' + esc(d.insertions) + '</span> <span class="del">−' + esc(d.deletions) + '</span>' + (o.head ? ' · <code>' + esc(String(o.head).slice(0, 7)) + '</code>' : '') + '</p>' +
+          '<ul class="dstat">' + d.files.map(function (f) { return '<li><code>' + esc(f.path) + '</code><span>' + (f.binary ? '<span class="small">binary</span>' : '<span class="add">+' + esc(f.add) + '</span> <span class="del">−' + esc(f.del) + '</span>') + '</span></li>'; }).join('') + '</ul>' +
+          (d.text ? '<details class="diffbox"><summary>Show the diff</summary><div class="diffv"></div></details>' : '') : missing('No diff recorded')) +
+        '<div class="cmds">' + cmds + '</div></article>';
+    }
+    function renderDiff(box, text, truncated) { // text is shown with textContent only, never parsed as HTML
+      var files = [], cur = null;
+      var lines = String(text).split('\n');
+      if (lines.length && lines[lines.length - 1] === '') lines.pop();
+      lines.forEach(function (line) {
+        if (/^diff --git /.test(line) || !cur) {
+          var m = /^diff --git a\/(.*) b\/(.*)$/.exec(line);
+          cur = { path: m ? m[2] : (/^diff /.test(line) ? line.slice(5) : 'Patch'), lines: [], add: 0, del: 0 };
+          files.push(cur);
+          if (/^diff /.test(line)) { cur.lines.push(line); return; }
+        }
+        cur.lines.push(line);
+      });
+      files.forEach(function (f, i) {
+        var det = document.createElement('details');
+        det.className = 'dfile';
+        if (i < 4) det.open = true;
+        var sum = document.createElement('summary');
+        var pre = document.createElement('pre'), inner = document.createElement('div');
+        pre.className = 'dl'; inner.className = 'dli';
+        pre.appendChild(inner);
+        f.lines.forEach(function (l) {
+          var s = document.createElement('span');
+          var c = /^(\+\+\+|---) /.test(l) || /^(diff |index |new file|deleted file|similarity|rename |old mode|new mode|Binary files)/.test(l) ? 'm' : l.charAt(0) === '+' ? 'a' : l.charAt(0) === '-' ? 'd' : /^@@/.test(l) ? 'h' : 'c';
+          if (c === 'a') f.add++; else if (c === 'd') f.del++;
+          s.className = c;
+          s.textContent = l;
+          inner.appendChild(s);
+        });
+        var code = document.createElement('code'); code.textContent = f.path;
+        var cnt = document.createElement('span'); cnt.className = 'small'; cnt.textContent = ' +' + f.add + ' −' + f.del;
+        sum.appendChild(code); sum.appendChild(cnt);
+        det.appendChild(sum); det.appendChild(pre);
+        box.appendChild(det);
+      });
+      if (truncated) {
+        var p = document.createElement('p'); p.className = 'missing';
+        p.textContent = 'This diff was cut short because it is large. Switch to the branch to see all of it.';
+        box.appendChild(p);
+      }
+    }
+    function copyText(btn) {
+      var txt = btn.getAttribute('data-copy');
+      function done(ok) {
+        btn.textContent = ok ? 'Copied' : 'Select and copy';
+        var live = document.getElementById('rk-live'); if (live) live.textContent = ok ? 'Copied: ' + txt : 'Copy failed. Select the command and copy it.';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+        if (!ok) { var r = document.createRange(); r.selectNodeContents(btn.parentNode.querySelector('code')); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+      }
+      function fallback() {
+        var ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta); btn.focus(); done(ok);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function () { done(true); }, fallback);
+      else fallback();
+    }
+    function proposalDetail(p, optId) {
+      var opts = p.options;
+      var plats = PLATS.filter(function (pid) { return opts.some(function (o) { return o.platforms && o.platforms[pid]; }); });
+      var plat = store('propPlat');
+      if (plats.indexOf(plat) < 0) plat = plats[0];
+      var rec = p.recommendation, ad = p.adopted;
+      var recO = rec && opts.filter(function (o) { return o.id === rec.option; })[0];
+      var html = '<p class="back"><a href="' + H + 'proposals">‹ All proposals</a></p><h1 class="view-title">' + esc(p.title) + '</h1>' +
+        '<div class="tags dtags">' + pTag(p.status) + (p.date ? '<span class="small">' + esc(p.date) + '</span>' : '') + (p.idea ? '<span class="small">From idea</span> ' + ideaChip(p.idea) : '') + '</div>' +
+        sec('Brief', orMissing(p.brief));
+      if (ad) html += '<div class="callout ok"><div class="k">Adopted</div><h2>' + esc(optTitle(p, ad.option)) + '</h2><p class="small">' + [ad.date ? 'on ' + esc(ad.date) : '', ad.commit ? 'commit <code>' + esc(String(ad.commit).slice(0, 10)) + '</code>' : ''].filter(Boolean).join(' · ') + '</p>' + (given(p.decision) ? '<div class="rich">' + p.decision + '</div>' : '') + '</div>';
+      else if (given(p.decision)) html += '<div class="callout"><div class="k">Decision</div><div class="rich">' + p.decision + '</div></div>';
+      if (rec) html += '<div class="callout rec"><div class="k">Recommended</div><h2><a href="' + optHref(p, { id: rec.option }) + '">' + esc(recO ? recO.title : rec.option) + '</a></h2>' + orMissing(rec.html, 'No reasoning given for the recommendation') + '</div>';
+      else if (p.status === 'open' && opts.length > 1) html += '<div class="callout"><div class="k">Recommended</div>' + missing('No recommendation yet') + '</div>';
+      html += sec('Comparison', compareHtml(p));
+      html += '<section class="opts-sec"><div class="opts-head"><h2>Options <span class="small">' + opts.length + '</span></h2>' + (plats.length > 1 ? seg('plat', plats.map(function (x) { return [x, PL[x].label]; }), plat) : '') + '</div>' +
+        '<div class="opts" style="--n:' + Math.min(opts.length, 3) + '">' + opts.map(function (o) { return optionCard(p, o, plat, plats); }).join('') + '</div>' +
+        '<section class="card diffpanel" id="diffpanel" hidden aria-labelledby="dp-h"><div class="dp-head"><h3 id="dp-h" tabindex="-1"></h3><button type="button" class="btn" id="dp-close">Close the diff</button></div><div class="diffv"></div></section></section>';
+      app.innerHTML = html;
+      linkRefs(app, key);
+      var s = app.querySelector('.opts-head [data-seg=plat]');
+      if (s) s.addEventListener('click', function (e) {
+        var b = e.target.closest('button'); if (!b) return;
+        s.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+        plat = b.getAttribute('data-v'); store('propPlat', plat);
+        opts.forEach(function (o) { var el = app.querySelector('#opt-' + CSS.escape(o.id) + ' .oshots'); if (el) { el.innerHTML = optShots(o, plat); linkRefs(el, key); } });
+      });
+      var nb = document.getElementById('mx-notes');
+      if (nb) nb.addEventListener('click', function () {
+        var on = nb.getAttribute('aria-pressed') !== 'true';
+        app.querySelectorAll('.cmx details').forEach(function (d) { d.open = on; });
+        nb.setAttribute('aria-pressed', on); nb.textContent = on ? 'Hide all score notes' : 'Show all score notes';
+      });
+      // Diffs: inline when the options are stacked (phones), in one full-width panel under the columns when they sit
+      // side by side, so long lines stay readable. The option's <details> stays the toggle in both layouts.
+      var panel = document.getElementById('diffpanel');
+      function sideBySide() { return getComputedStyle(app.querySelector('.opts')).gridTemplateColumns.split(' ').length > 1; }
+      function optOf(det) { var id = det.closest('.opt').getAttribute('data-o'); return opts.filter(function (x) { return x.id === id; })[0]; }
+      function hidePanel() { panel.hidden = true; panel.removeAttribute('data-o'); panel.querySelector('.diffv').textContent = ''; }
+      app.querySelectorAll('.diffbox').forEach(function (det) {
+        det.addEventListener('toggle', function () {
+          var o = optOf(det), v = det.querySelector('.diffv');
+          if (!det.open) { if (panel.getAttribute('data-o') === o.id) hidePanel(); return; }
+          if (!sideBySide()) { if (!v.childNodes.length || v.querySelector('.dp-note')) { v.textContent = ''; renderDiff(v, o.diff.text, o.diff.truncated); } return; }
+          app.querySelectorAll('.diffbox[open]').forEach(function (d) { if (d !== det) d.open = false; }); // one diff at a time
+          v.textContent = '';
+          var note = document.createElement('p'); note.className = 'small dp-note'; note.textContent = 'The diff is open below the options.';
+          v.appendChild(note);
+          var pv = panel.querySelector('.diffv');
+          pv.textContent = '';
+          renderDiff(pv, o.diff.text, o.diff.truncated);
+          document.getElementById('dp-h').textContent = 'Diff: ' + o.title;
+          panel.setAttribute('data-o', o.id);
+          panel.hidden = false;
+          panel.scrollIntoView({ block: 'start' });
+          document.getElementById('dp-h').focus({ preventScroll: true });
+        });
+      });
+      document.getElementById('dp-close').addEventListener('click', function () {
+        var id = panel.getAttribute('data-o');
+        var det = id && app.querySelector('#opt-' + CSS.escape(id) + ' .diffbox');
+        hidePanel();
+        if (det) { det.open = false; var sm = det.querySelector('summary'); sm.scrollIntoView({ block: 'center' }); sm.focus({ preventScroll: true }); }
+      });
+      app.querySelector('.opts').addEventListener('click', function (e) {
+        var c = e.target.closest('[data-copy]'); if (c) { copyText(c); return; }
+        var img = e.target.closest('img[data-lb]'); if (!img) return;
+        var all = Array.prototype.slice.call(app.querySelectorAll('.opts img[data-lb]'));
+        lb.open(all.map(function (x) { var it = imgItem(x); it.cap = '<b>' + esc(x.closest('.opt').querySelector('h3').textContent) + '</b> ' + it.cap; return it; }), all.indexOf(img));
+      });
+      if (optId) {
+        var oc = app.querySelector('#opt-' + CSS.escape(optId));
+        if (oc) {
+          oc.classList.add('hl');
+          setTimeout(function () { oc.scrollIntoView({ block: 'start' }); oc.querySelector('h3').focus({ preventScroll: true }); }, 30);
+        }
+      }
+    }
+
+    // a card for the combined landing page, with numbers that fit the kind
+    function card(label) {
+      var acc = P.theme.accent, body;
+      if (KIND === 'ideas' || (KIND === 'design' && !PROPS.length && IDEAS.length)) {
+        var n = ideaCounts();
+        body = '<div class="small">' + [IDEAS.length + ' idea' + (IDEAS.length === 1 ? '' : 's'), RESEARCH.length + ' research finding' + (RESEARCH.length === 1 ? '' : 's'), 'updated ' + esc(D.generated)].join(' · ') + '</div>' +
+          tiles([[n.go, 'Go', 'fixed'], [n.maybe, 'Maybe', 'partial'], [n.proposed, 'Proposed', 'open']]);
+      } else if (KIND === 'design') {
+        var nOpt = PROPS.reduce(function (a, p) { return a + p.options.length; }, 0);
+        var cnt = function (st) { return PROPS.filter(function (p) { return p.status === st; }).length; };
+        body = '<div class="small">' + [PROPS.length + ' proposal' + (PROPS.length === 1 ? '' : 's'), nOpt + ' options', 'updated ' + esc(D.generated)].join(' · ') + '</div>' +
+          tiles([[cnt('open'), 'Open', 'open'], [cnt('adopted'), 'Adopted', 'fixed'], [cnt('closed'), 'Closed', 'open']]) +
+          '<ul class="list rv-props">' + PROPS.filter(function (p) { return p.status === 'open'; }).slice(0, 3).map(propRow).join('') + '</ul>';
+      } else {
+        var list = ALL.filter(function (it) { return it.counted; }), c = counts(list);
+        var items = []; D.plan.forEach(function (g) { items = items.concat(g.items); });
+        body = '<div class="small">' + [list.length + ' issue' + (list.length === 1 ? '' : 's'), D.fixes.length + ' fix' + (D.fixes.length === 1 ? '' : 'es'), 'updated ' + esc(D.generated)].join(' · ') + '</div>' + statsHtml(c) +
+          (items.length ? '<p class="small rv-plan">Plan: ' + planSummary(planCounts(items)) + '</p>' : '');
+      }
+      var go = VIEWS.filter(function (v) { return v[0] !== 'overview'; });
+      return '<section class="card rv-card"><h2><a class="rv-t" href="' + H + 'overview">' + esc(label) + '</a></h2>' + body +
+        '<div class="rv-go"><a class="btn primary rv-open" href="' + H + 'overview" style="background:' + esc(acc) + ';border-color:' + esc(acc) + ';color:' + (lum(hex(acc)) > 0.45 ? '#13232a' : '#fff') + '">Open ' + esc(label) + ' review</a>' +
+        go.map(function (v) { return '<a class="btn" href="' + H + v[0] + '">' + v[1] + '</a>'; }).join('') + '</div></section>';
+    }
+
     return {
-      key: key, D: D, P: P, theme: theme, route: route, hasView: function (v) { return VIEWS.some(function (x) { return x[0] === v; }); },
-      view: function () { return current; }, counted: function () { return ALL.filter(function (it) { return it.counted; }); },
-      counts: counts, statsHtml: statsHtml, bar: bar, planCounts: planCounts, planSummary: planSummary
+      key: key, D: D, P: P, kind: KIND, theme: theme, route: route, hasView: function (v) { return VIEWS.some(function (x) { return x[0] === v; }); },
+      view: function () { return current; }, card: card,
+      lookup: function (what, id) { return what === 'ideas' ? IDEA[id] : what === 'research' ? RES[id] : PROP[id]; },
+      ids: function () { return RESEARCH.map(function (r) { return r.id; }).concat(IDEAS.map(function (x) { return x.id; })); }
     };
   }
 
@@ -677,6 +1129,58 @@
 
   // ------------------------------------------------------------ reviews, switch and routing
   var REV = LIST.map(function (x) { var r = Review(x.data, x.key); r.label = x.label; return r; });
+  function findIn(what, id, key) { // an idea or proposal by id: this review first, then the others in a combined site
+    var order = REV.filter(function (r) { return r.key === key; }).concat(REV.filter(function (r) { return r.key !== key; }));
+    for (var i = 0; i < order.length; i++) {
+      var x = order[i].lookup(what, id);
+      if (x) return { x: x, h: order[i].key ? '#/' + order[i].key + '/' : '#/' };
+    }
+    return null;
+  }
+  // Research and idea ids mentioned in rich text ("[r-1]", "(r-2)", "i-3") become links. Works on rendered text nodes
+  // only (never rebuilds HTML) and skips text already inside a link, code, a button or a summary.
+  var REF_RE;
+  function refRe() {
+    if (REF_RE !== undefined) return REF_RE;
+    var ids = [];
+    REV.forEach(function (r) { r.ids().forEach(function (id) { if (ids.indexOf(id) < 0) ids.push(id); }); });
+    ids.sort(function (a, b) { return b.length - a.length; });
+    REF_RE = ids.length ? new RegExp('(^|[^\\w.:-])(\\[)?(' + ids.map(function (id) { return id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|') + ')(\\])?(?![\\w-])', 'g') : null;
+    return REF_RE;
+  }
+  function linkRefs(root, key) {
+    var re = refRe();
+    if (!re || !root) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) { return n.parentNode.closest('a, code, pre, button, summary, textarea, script, style, .ref') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (n) {
+      var text = n.nodeValue, m, last = 0, frag = null;
+      re.lastIndex = 0;
+      while ((m = re.exec(text))) {
+        var id = m[3];
+        var f = findIn('research', id, key), what = 'research';
+        if (!f) { f = findIn('ideas', id, key); what = 'ideas'; }
+        if (!f) continue;
+        if (m[2] && !m[4]) continue; // "[r-1" without its closing bracket: leave it alone
+        frag = frag || document.createDocumentFragment();
+        var start = m.index + m[1].length;
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement('a');
+        a.className = 'ref';
+        a.href = f.h + what + '/' + encodeURIComponent(id);
+        a.textContent = id;
+        a.setAttribute('aria-label', (what === 'research' ? 'Research ' : 'Idea ') + id + ': ' + f.x.title);
+        frag.appendChild(a);
+        last = m.index + m[0].length - (m[4] && !m[2] ? 1 : 0); // keep a "]" that had no opening bracket
+      }
+      if (!frag) return;
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
   var BYKEY = {}; REV.forEach(function (r) { BYKEY[r.key] = r; });
   var shown = null;
   var TITLE = document.title;
@@ -732,17 +1236,7 @@
     document.getElementById('tabs-bottom').innerHTML = '';
     document.body.classList.add('no-bottom');
     renderSwitch(null);
-    app.innerHTML = '<h1 class="view-title">Overview</h1><div class="grid2">' + REV.map(function (r) {
-      var list = r.counted(), c = r.counts(list), D = r.D, H = '#/' + r.key + '/', acc = r.P.theme.accent; // each card in its review's accent
-      var meta = [list.length + ' issue' + (list.length === 1 ? '' : 's'), D.fixes.length + ' fix' + (D.fixes.length === 1 ? '' : 'es'), 'updated ' + esc(D.generated)];
-      var items = []; D.plan.forEach(function (g) { items = items.concat(g.items); });
-      var go = [['issues', 'Issues'], ['fixes', 'Fixes'], ['plan', 'Plan']].filter(function (v) { return r.hasView(v[0]); });
-      return '<section class="card"><h2><a class="rv-t" href="' + H + 'overview">' + esc(r.label) + '</a></h2>' +
-        '<div class="small">' + meta.join(' · ') + '</div>' + r.statsHtml(c) +
-        (items.length ? '<p class="small rv-plan">Plan: ' + r.planSummary(r.planCounts(items)) + '</p>' : '') +
-        '<div class="rv-go"><a class="btn primary rv-open" href="' + H + 'overview" style="background:' + esc(acc) + ';border-color:' + esc(acc) + ';color:' + (lum(hex(acc)) > 0.45 ? '#13232a' : '#fff') + '">Open ' + esc(r.label) + ' review</a>' +
-        go.map(function (v) { return '<a class="btn" href="' + H + v[0] + '">' + v[1] + '</a>'; }).join('') + '</div></section>';
-    }).join('') + '</div>';
+    app.innerHTML = '<h1 class="view-title">Overview</h1><div class="grid2">' + REV.map(function (r) { return r.card(r.label); }).join('') + '</div>';
   }
 
   if (wide.addEventListener) wide.addEventListener('change', function () { if (/fixes/.test(location.hash)) route(); });

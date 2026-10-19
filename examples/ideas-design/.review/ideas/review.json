@@ -1,0 +1,276 @@
+{
+  "$schema": "https://raw.githubusercontent.com/NicholasErlin/review-kit/main/schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "Pocket Tasks",
+    "title": "Ideas and research",
+    "kind": "ideas",
+    "date": "2026-10-19",
+    "description": "**Question:** how should Pocket Tasks welcome someone who opens it for the first time?\n\n**Goal:** a new user adds their first task within a minute, without reading anything first. **Users:** people who open the app on a phone with a task already in mind. **Constraints:** no accounts, no backend, no build step; the app is three small files. **Success looks like:** the first task is added without help, and returning users never see first-run UI again.",
+    "theme": {
+      "accent": "#5b4a8a"
+    },
+    "links": []
+  },
+  "platforms": [
+    {
+      "id": "default",
+      "label": "All",
+      "shape": "auto"
+    }
+  ],
+  "research": [
+    {
+      "id": "r-1",
+      "title": "An empty list is the best place to teach, better than a tutorial up front",
+      "summary": "**Fact:** NN/g recommends using empty states to tell users what could appear there and how to fill it, and reports this usually works better than forced tutorials at first use.\n\n**Inference:** Pocket Tasks starts with an empty list for a new user, so the empty list is exactly where the first-run help belongs.",
+      "sources": [
+        {
+          "label": "NN/g: Designing Empty States in Complex Applications: 3 Guidelines",
+          "href": "https://www.nngroup.com/articles/empty-state-interface-design/",
+          "accessed": "2026-10-19",
+          "quote": "In most cases, this approach is generally more successful than forced tutorials shown to the user at initial use.",
+          "kind": "article"
+        }
+      ],
+      "confidence": "high",
+      "tags": [
+        "onboarding",
+        "empty-state"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "r-2",
+      "title": "Swipe-through tutorials rarely help; a simpler UI beats onboarding",
+      "summary": "**Fact:** NN/g's analysis of mobile onboarding advises against deck-of-cards tutorials and suggests avoiding onboarding where the UI can be made clear instead.\n\n**Inference:** a three-file task list has very little to explain; a welcome carousel would cost more attention than it saves. **Counter-evidence:** the same article accepts brief, contextual tips for features that are genuinely unusual, which Pocket Tasks does not have.",
+      "sources": [
+        {
+          "label": "NN/g: Mobile-App Onboarding: An Analysis of Components and Techniques",
+          "href": "https://www.nngroup.com/articles/mobile-app-onboarding/",
+          "accessed": "2026-10-19",
+          "quote": "Therefore, we don’t recommend deck-of-cards onboarding.",
+          "kind": "article"
+        }
+      ],
+      "confidence": "medium",
+      "tags": [
+        "onboarding"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "r-3",
+      "title": "The add field has only a placeholder, which fails as a label",
+      "summary": "**Fact (code):** `app/index.html` gives the add field `placeholder=\"What needs doing?\"` and no `<label>`. **Fact:** WCAG 2.2 SC 3.3.2 requires labels or instructions for input, and NN/g's research found placeholders used as labels strain short-term memory because the text disappears when typing starts.\n\n**Inference:** whatever first-run help we choose, the field needs a visible label first; otherwise the hint we add is the only thing explaining the field.",
+      "sources": [
+        {
+          "label": "WCAG 2.2 Understanding SC 3.3.2: Labels or Instructions",
+          "href": "https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions.html",
+          "accessed": "2026-10-19",
+          "quote": "Labels or instructions are provided when content requires user input.",
+          "kind": "standard"
+        },
+        {
+          "label": "NN/g: Placeholders in Form Fields Are Harmful",
+          "href": "https://www.nngroup.com/articles/form-design-placeholders/",
+          "accessed": "2026-10-19",
+          "quote": "Disappearing placeholder text strains users’ short-term memory.",
+          "kind": "study"
+        }
+      ],
+      "confidence": "high",
+      "tags": [
+        "accessibility",
+        "forms"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "r-4",
+      "title": "Pop-up tips must be dismissible without moving focus",
+      "summary": "**Fact:** WCAG 2.2 SC 1.4.13 requires content that appears on hover or focus to be dismissible without moving the pointer or focus (for example with Escape).\n\n**Inference:** a coach mark tied to the add field must close with Escape and must not cover the field; that is extra code and extra testing for a small app.",
+      "sources": [
+        {
+          "label": "WCAG 2.2 Understanding SC 1.4.13: Content on Hover or Focus",
+          "href": "https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html",
+          "accessed": "2026-10-19",
+          "quote": "A mechanism is available to dismiss the additional content without moving pointer hover or keyboard focus",
+          "kind": "standard"
+        }
+      ],
+      "confidence": "medium",
+      "tags": [
+        "accessibility"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "r-5",
+      "title": "localStorage can remember that first run is over",
+      "summary": "**Fact:** MDN documents that `localStorage` data has no expiration time, unlike `sessionStorage`.\n\n**Inference:** a one-key flag is enough to show first-run help once, with no backend. It is per browser, so a user on a second device sees it again; that is acceptable here.",
+      "sources": [
+        {
+          "label": "MDN: Window: localStorage property",
+          "href": "https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage",
+          "accessed": "2026-10-19",
+          "quote": "localStorage data has no expiration time",
+          "kind": "docs"
+        }
+      ],
+      "confidence": "high",
+      "tags": [
+        "implementation"
+      ],
+      "date": "2026-10-19"
+    }
+  ],
+  "ideas": [
+    {
+      "id": "i-1",
+      "title": "Teach in the empty list instead of a tour",
+      "status": "go",
+      "rank": 1,
+      "problem": "A new user lands on a blank page with one unlabeled field and nothing that says what the app is for or what to do next.",
+      "proposal": "When the list is empty, show a short message in its place: what will appear there and how to add the first task. It disappears as soon as a task exists.",
+      "reasoning": "The empty list is the first thing a new user sees and the exact spot the help is about, so the hint needs no extra step to read or dismiss ([r-1]). A tour would be the main alternative, and the evidence argues against it for an app this simple ([r-2]). It needs no storage: the state itself decides when to show it.",
+      "evidence": [
+        "r-1",
+        "r-2"
+      ],
+      "alternatives": "- **Do nothing:** keeps the app minimal, but the blank page gives no cue, and the unlabeled field makes it worse ([r-3]).\n- **Welcome carousel:** explicitly discouraged by [r-2], and it delays the first task.\n- **Sample tasks or a coach mark:** worth comparing as designs; see the *first-run* proposal.",
+      "risks": "Returning users who clear their list see the message again. That is mild (the text is still true) and needs no fix. Copy that is too long would be skipped: keep it to one heading and one sentence.",
+      "pros": [
+        "Help sits where the user is already looking",
+        "No storage or dismiss logic",
+        "Also helps after a user clears the list"
+      ],
+      "cons": [
+        "Says nothing about features beyond adding and ticking"
+      ],
+      "effort": "S",
+      "impact": "L",
+      "confidence": "high",
+      "decision": "Go. Compare it against sample tasks and a coach mark before building it for real.",
+      "proposals": [
+        "first-run"
+      ],
+      "tags": [
+        "onboarding"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "i-2",
+      "title": "Give the add field a visible label",
+      "status": "go",
+      "rank": 2,
+      "problem": "The add field relies on placeholder text, which disappears while typing and is not a label ([r-3]).",
+      "proposal": "Add a visible `<label for=\"text\">New task</label>` above the field and keep the placeholder as an example.",
+      "reasoning": "It is required for WCAG 3.3.2 conformance and it is the cheapest fix with the clearest evidence ([r-3]). Every first-run option is weaker without it.",
+      "evidence": [
+        "r-3"
+      ],
+      "alternatives": "- **`aria-label` only:** fixes screen readers but not sighted users who lose the placeholder while typing.\n- **Do nothing:** leaves a known WCAG failure in place.",
+      "risks": "Slightly taller header area on phones; check the add form still fits at 412 px.",
+      "pros": [
+        "Meets WCAG 3.3.2",
+        "One line of HTML"
+      ],
+      "cons": [
+        "Adds vertical space"
+      ],
+      "effort": "S",
+      "impact": "M",
+      "confidence": "high",
+      "decision": "Go. Fold it into whichever first-run design wins, then track it in the UI review.",
+      "tags": [
+        "accessibility"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "i-3",
+      "title": "Seed the list with three sample tasks that teach",
+      "status": "maybe",
+      "rank": 3,
+      "problem": "An empty list does not show what a full one looks like or that tasks can be ticked and deleted.",
+      "proposal": "On first run only, add three example tasks whose text explains the basic actions; remember with a `localStorage` flag ([r-5]) that they were shown.",
+      "reasoning": "Learning by doing: ticking the first sample teaches the checkbox. It shows the populated state [r-1] says users should be able to picture. The storage cost is one key ([r-5]).",
+      "evidence": [
+        "r-1",
+        "r-5"
+      ],
+      "alternatives": "- **Empty-state message (i-1):** teaches less but leaves the list clean.\n- **Do nothing:** see i-1.",
+      "risks": "Users must delete the samples before the list is truly theirs, and the remaining count starts at 3, which misreports their real tasks. Mitigate with a clear sample style and a one-tap \"clear samples\".",
+      "pros": [
+        "Shows the full list state",
+        "Teaches by doing"
+      ],
+      "cons": [
+        "Clutters the user's real list",
+        "The remaining count is wrong until samples are removed"
+      ],
+      "effort": "S",
+      "impact": "M",
+      "confidence": "medium",
+      "decision": "Maybe: build it as an option in the first-run proposal so we can compare it side by side.",
+      "proposals": [
+        "first-run"
+      ],
+      "tags": [
+        "onboarding"
+      ],
+      "date": "2026-10-19"
+    },
+    {
+      "id": "i-4",
+      "title": "A three-screen welcome carousel",
+      "status": "no",
+      "rank": 4,
+      "problem": "Same as i-1: first-time users get no orientation.",
+      "proposal": "Show three swipeable welcome cards before the app, with a Skip button.",
+      "reasoning": "Commonly seen in mobile apps, which is the only argument for it here. The evidence points the other way: [r-2] advises against deck-of-cards onboarding, and [r-1] finds in-context help works better than up-front tutorials.",
+      "evidence": [
+        "r-1",
+        "r-2"
+      ],
+      "alternatives": "i-1 and i-3 teach in context and cost less.",
+      "risks": "Delays the first task; users skip it; another screen to keep accessible and up to date.",
+      "pros": [
+        "Room for branding"
+      ],
+      "cons": [
+        "Delays the first task",
+        "Users tend to skip it"
+      ],
+      "effort": "M",
+      "impact": "S",
+      "confidence": "high",
+      "decision": "No. The research is against it and the app has nothing complex to explain.",
+      "tags": [
+        "onboarding"
+      ],
+      "date": "2026-10-19"
+    }
+  ],
+  "plan": [
+    {
+      "id": "next",
+      "title": "Next",
+      "items": [
+        {
+          "id": "plan-first-run",
+          "title": "Compare first-run designs (empty state, sample tasks, coach mark)",
+          "status": "doing",
+          "note": "See the design review."
+        },
+        {
+          "id": "plan-label",
+          "title": "Add a visible label to the add field",
+          "status": "todo"
+        }
+      ]
+    }
+  ]
+}

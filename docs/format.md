@@ -6,7 +6,7 @@ The authoritative definition is [`schema/review.schema.json`](../schema/review.s
 
 - **Paths.** Image `src` and local link `href` values are relative to the folder that contains `review.json` and must resolve inside it, including symlink targets. The builder copies them under `img/` and `files/` and adds a content hash. Hidden files, common credential/session filenames and active file types such as HTML and SVG are rejected. Screenshots support PNG, JPEG, GIF, WebP and AVIF; attachments also support PDF, text, Markdown, CSV, TSV, JSON, patch and diff files. The CLI can explicitly import absolute screenshot paths before building.
 - **Rich text.** Fields marked *rich* are Markdown by default. The renderer supports paragraphs, `#` headings, `-` and `1.` lists, `>` quotes, fenced code, `**bold**`, `*em*`, `~~strike~~`, `` `code` ``, `[links](url)` and basic inline HTML. Set `project.textFormat` to `"html"` to import HTML reports. Both modes sanitize tags and attributes: formatting and tables survive; scripts, embedded images, styles and event handlers do not. Add images through screenshot fields. Links allow HTTP, HTTPS, mailto and relative destinations; executable schemes and credential-bearing URLs are rejected.
-- **Ids.** Ids start with a letter or digit and may then contain letters, digits, `.`, `_`, `:` and `-`. Issue, fix, area and plan item ids must be unique.
+- **Ids.** Ids start with a letter or digit and may then contain letters, digits, `.`, `_`, `:` and `-`. Issue, fix, area, plan item, research and idea ids must be unique. Proposal and option ids are stricter, because they become branch names: lower-case letters, digits and `-`.
 - **Versioning.** `version` is `1`. Additive, optional fields keep the version. A breaking change bumps it, and the builder will refuse versions it does not know.
 
 ## Top level
@@ -22,10 +22,13 @@ The authoritative definition is [`schema/review.schema.json`](../schema/review.s
 | `fixes` | array | See below. |
 | `plan` | array | Roadmap groups: `{id?, title, platform?, intro (rich), items: [...]}`. |
 | `appendix` | array | Free sections shown at the end of the Plan tab: `{title, platform?, body (rich)}`. |
+| `research` | array | Research findings with sources. See below. Any kind of review may have them; ideas reviews use them most. |
+| `ideas` | array | Ideas with their reasoning. See below. |
+| `proposals` | array | Design proposals with their options. See below. |
 
 ### project
 
-`name` is required. The other fields are optional: `title` (shown after the name, default "Review"), `kind` (`ui` or `backend`, default `ui`: what is reviewed, which tells agents which playbook to follow; when several reviews are built into one site, it also gives each its label and place in the switch: UI/UX first, then Backend), `description` (rich), `date`, `repo` (a public HTTP(S) URL), and `links`. Each link is `[{label, href, kind?}]`. When `href` is a local file such as a PDF, it is copied into the site. `textFormat` is `markdown` or `html`. `theme` takes `{accent, accentDark, logoText}`. `accent` colours the header and the primary buttons. `accentDark` sets the link colour in dark mode and is derived automatically when it is omitted. `logoText` holds up to 3 characters for the badge.
+`name` is required. The other fields are optional: `title` (shown after the name, default "Review"), `kind` (`ui`, `backend`, `ideas` or `design`, default `ui`: what is reviewed, which tells agents which playbook to follow and which tabs the site shows first; when several reviews are built into one site, it also gives each its label and place in the switch: Ideas, Designs, UI/UX, then Backend), `description` (rich), `date`, `repo` (a public HTTP(S) URL), and `links`. Each link is `[{label, href, kind?}]`. When `href` is a local file such as a PDF, it is copied into the site. `textFormat` is `markdown` or `html`. `theme` takes `{accent, accentDark, logoText}`. `accent` colours the header and the primary buttons. `accentDark` sets the link colour in dark mode and is derived automatically when it is omitted. `logoText` holds up to 3 characters for the badge.
 
 ### issues
 
@@ -60,6 +63,61 @@ An image is a path string, or `{src, caption? (rich), alt?}`.
 ### plan items
 
 `title` is required and is inline rich text. The optional fields are `id`, `phase`, `severity`, `details`, `files` (a string or a list), `effort`, `status` (`todo` by default, or `doing`, `partial`, `done`, `dropped`), `note`, `issues` and `fixes`. The two id lists render as chips.
+
+### research
+
+| Field | Notes |
+| --- | --- |
+| `id`, `title` | Required. The title is plain text. `add-research` uses `r-<number>`. |
+| `summary` | Rich text: what was found. Keep facts apart from inference. |
+| `sources` | `[{label, href, accessed?, quote?, kind?}]`. `href` is a URL or a path relative to `review.json`. `accessed` is an ISO date; `quote` a short plain excerpt; `kind` a free word such as `standard`, `docs`, `study`, `article` or `code`. |
+| `confidence` | `low`, `medium` or `high`. |
+| `tags`, `date` | Optional. |
+
+### ideas
+
+| Field | Notes |
+| --- | --- |
+| `id`, `title` | Required. `add-idea` uses `i-<number>`. |
+| `status` | `proposed` (the default), `go`, `maybe`, `no` or `done`. Set by the user's call (`decide`). |
+| `problem`, `proposal`, `reasoning`, `alternatives`, `risks`, `decision` | Rich text. `reasoning` says why this and why now, tied to research ids. `decision` holds the user's call and why. |
+| `evidence` | Ids of research entries that support the idea. |
+| `pros`, `cons` | Lists of inline rich text. |
+| `effort`, `impact` | `S`, `M` or `L`. |
+| `confidence` | `low`, `medium` or `high`. |
+| `proposals` | Ids of design proposals for this idea; they may be in the design review. |
+| `tags`, `date`, `rank` | Optional. `rank` orders the shortlist. |
+
+### proposals
+
+| Field | Notes |
+| --- | --- |
+| `id`, `title` | Required. The id uses lower-case letters, digits and `-` (up to 41 characters), because it becomes part of branch names. |
+| `status` | `open` (the default), `adopted` or `closed`. |
+| `brief` | Rich text: what is being decided, and the constraints. |
+| `idea` | The idea this comes from; it may be in the ideas review. |
+| `criteria` | `[{id, label, weight?, description?}]`. `weight` is 1 to 5 (default 1). |
+| `recommendation` | `{option, reasoning (rich)}`: the recommended option and why, including when another would be better. |
+| `decision`, `adopted` | `decision` is rich text. `adopted` is `{option, commit?, date?}`, set by `adopt`. |
+| `options` | See below. |
+| `date` | Optional. |
+
+Each option:
+
+| Field | Notes |
+| --- | --- |
+| `id`, `title` | Required. Same id rules as the proposal. The branch is `design/<proposal>/<option>`. |
+| `status` | `proposed` (the default), `adopted` or `rejected`. |
+| `summary`, `reasoning`, `evidence` | Rich text. `evidence` holds test output or measurements. |
+| `pros`, `cons` | Lists of inline rich text. |
+| `scores` | `{<criterion id>: {score, note?}}`. `score` is an integer from 1 to 5; `note` (rich) explains it. The site shows a weighted total out of 100; a missing score counts as 0. |
+| `branch`, `base`, `head` | The branch name and the commits it starts from and ends at. |
+| `worktree` | The worktree path, relative to the repository root. Never absolute, and never shown on the site. |
+| `gone` | `true` once `discard` removed the branch and worktree. The snapshot stays. |
+| `diff` | `{path, files: [{path, add, del}], insertions, deletions, truncated?}`. `path` points at the saved patch, relative to `review.json` (`diffs/<proposal>--<option>.patch`). The site embeds the patch text and shows it as plain text. |
+| `platforms` | `{<platform id>: {description?, images: [image]}}`: screenshots of the option, taken the same way for every option. |
+
+`validate` reports errors for unknown research, criterion or option ids, scores outside 1 to 5, duplicate ids, bad proposal or option ids, an absolute `worktree`, and a missing diff file. It warns about weak reasoning: research with no sources; ideas with no reasoning, evidence, alternatives or risks; a `go` idea with no decision note; proposals with fewer than 2 options or no criteria; options with no reasoning or a missing score; and an open proposal with 2 or more options and no recommendation.
 
 ## Hand-off envelope (pending/*.json)
 
