@@ -436,7 +436,9 @@ export async function serve(directory: string, host = '127.0.0.1', port = 8787, 
   port = (server.address() as AddressInfo).port;
   if (!LOOPBACK_HOSTS.includes(host)) print('Network sharing enabled: anyone who can reach this port can read the review.');
   print(`Serving ${abspath(directory)}`);
-  print(`  local:   http://localhost:${port}/`);
+  // The server listens on IPv4; `localhost` may resolve to ::1 first (Node 18's fetch does), so print the address.
+  const local = host === 'localhost' ? 'localhost' : host === '::1' ? '[::1]' : '127.0.0.1';
+  print(`  local:   http://${local}:${port}/`);
   if (host === '0.0.0.0' || host === '') {
     const ips = await lanAddresses();
     const tail = ips.slice(1).filter((ip) => !tailscale(ip));
