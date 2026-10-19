@@ -7,9 +7,9 @@ description: "Use when reviewing or fixing a repo in several steps and the user 
 
 These instructions work with any coding agent that can run shell commands and look at image files.
 
-Run the CLI as `review-kit <command>` (written `rk` below). It needs Python 3.8+ and has no other dependencies.
+Run the CLI as `review-kit <command>` (written `rk` below). It needs Node.js 18+ and has no other dependencies.
 
-- If `review-kit` is not on PATH, try `~/review-kit/bin/review-kit`. If the kit isn't installed at all, ask the user before installing it with `curl -fsSL https://raw.githubusercontent.com/NicholasErlin/review-kit/main/install.sh | bash`.
+- If `review-kit` is not on PATH, run it one-off with `npx @horus52/review-kit <command>`. If the user wants it installed, ask before running `npm i -g @horus52/review-kit && review-kit setup` (`setup` links this skill into `~/.claude/skills`).
 - `rk home` prints the kit folder, written `$KIT` below. Longer docs are in `$KIT/docs/workflow.md` (process) and `$KIT/docs/format.md` (fields).
 
 ## Report first, fix only when told
@@ -71,7 +71,7 @@ For a backend review, follow the Recording section of `backend-review.md`: a reg
 How to capture:
 
 - **The project has Playwright** (check `node_modules/playwright` or `@playwright/test`): run this from the project root:
-  `node "$(rk home)/capture/shot.mjs" --url <url> --viewport mobile|desktop|WxH --out .review/ui/screenshots/<fix>/<page>-<platform>-before.png`
+  `rk shot --url <url> --viewport mobile|desktop|WxH --out .review/ui/screenshots/<fix>/<page>-<platform>-before.png`
   - Optional flags: `--full`, `--dark`, `--storage state.json` (logged in), `--steps steps.mjs` (`export default async (page) => {...}` to open dialogs or scroll), `--selector`.
   - If Playwright is elsewhere, set `PLAYWRIGHT_PATH=/abs/node_modules/playwright`.
 - **No Playwright:** try `npx playwright` (may need `npx playwright install chromium`), the project's e2e tooling, `xcrun simctl io booted screenshot`, or `adb exec-out screencap -p > x.png`. If none of these work, ask the user for screenshots.

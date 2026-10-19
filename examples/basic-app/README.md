@@ -20,7 +20,7 @@ review/                its output: review.json and screenshots/ (site/ is gitign
 
 ## Run it yourself
 
-You need Python 3.8+, node, and Playwright with Chromium:
+You need Node.js 18+, the kit built from this repository (`npm install && npm run build`), and Playwright with Chromium:
 
 ```bash
 PLAYWRIGHT_PATH=/path/to/node_modules/playwright examples/basic-app/run.sh
@@ -64,6 +64,6 @@ This removes the built `review/site/`, any merged `pending/*.applied.json`, and 
 To try the loop on your own app, copy `run.sh` and change four things:
 
 - `app/` and the `URL`: point at your dev server instead of the scratch copy.
-- `shot`: set the viewports, and the `--steps` or `--storage` your pages need (see `capture/shot.mjs`).
+- `shot`: set the viewports, and the `--steps` or `--storage` your pages need (see `review-kit shot -h`).
 - `fix`: replace `patch` with your actual code changes. In practice you or an agent edit the code between the before and after shots.
 - The `add-issue` and `add-fix` text.

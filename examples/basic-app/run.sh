@@ -4,14 +4,21 @@
 #   ./run.sh           audit the app, fix it patch by patch with before/after screenshots, build review/site
 #   ./run.sh clean     tidy review/: remove the built site, merged hand-offs and unreferenced screenshots
 #
-# Needs Python 3.8+, node and Playwright with Chromium. Playwright is found through PLAYWRIGHT_PATH, e.g.
+# Needs Node.js 18+ (run `npm install && npm run build` in the kit first) and Playwright with Chromium.
+# Playwright is found through PLAYWRIGHT_PATH, e.g.
 #   PLAYWRIGHT_PATH=/path/to/node_modules/playwright ./run.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(cd "$HERE/../.." && pwd)"
-rk() { python3 "$KIT/bin/review-kit" "$@"; }
+CLI="$KIT/dist/cli.js"
+rk() { node "$CLI" "$@"; }
 REVIEW="$HERE/review"
+
+if [ ! -f "$CLI" ]; then
+  echo "$CLI not found. Build the kit first: (cd $KIT && npm install && npm run build)" >&2
+  exit 2
+fi
 
 if [ "${1:-}" = "clean" ]; then
   rk clean "$REVIEW/review.json" --orphans
@@ -25,17 +32,17 @@ fi
 
 # The app is copied to a scratch folder and patched there, so app/ always stays in its original, buggy state.
 WORK="$(mktemp -d)"
-PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/app" >/dev/null 2>&1 &
+cp -R "$HERE/app" "$WORK/app"
+PORT="$(node -e 'const s = require("net").createServer().listen(0, "127.0.0.1", () => { console.log(s.address().port); s.close(); })')"
+node "$CLI" serve "$WORK/app" --port "$PORT" --host 127.0.0.1 >/dev/null 2>&1 &
 SERVER=$!
 cleanup() { kill "$SERVER" 2>/dev/null && wait "$SERVER" 2>/dev/null || true; rm -rf "$WORK"; }
 trap cleanup EXIT
-cp -R "$HERE/app" "$WORK/app"
 URL="http://127.0.0.1:$PORT/"
 until curl -sf "$URL" >/dev/null; do sleep 0.2; done
 
 shot() { # shot <mobile|desktop> <out.png>
-  (cd "$WORK" && node "$KIT/capture/shot.mjs" --url "$URL" --viewport "$1" --out "$2" --wait-for ".task") >/dev/null
+  (cd "$WORK" && rk shot --url "$URL" --viewport "$1" --out "$2" --wait-for ".task") >/dev/null
 }
 fix() { # fix <patch name>: apply one patch from fixes/ to the running copy
   patch -s -p1 -d "$WORK/app" < "$HERE/fixes/$1.patch"
@@ -123,4 +130,4 @@ rk build "$R"
 echo
 rk summary "$R"
 echo
-echo "Open review/site/index.html, or run: $KIT/bin/review-kit serve $REVIEW"
+echo "Open review/site/index.html, or run: review-kit serve $REVIEW"

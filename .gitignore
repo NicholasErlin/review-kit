@@ -1,15 +1,19 @@
-# Python
+# Node (dist/ is built by `npm run build` and published, not committed)
+node_modules/
+dist/
+*.tgz
+
+# Python (the bundled companion skills ship Python helper scripts)
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# Build output (regenerate with `review-kit build`). reviewkit/site/ is the template and IS tracked.
-/site/
+# Build output (regenerate with `review-kit build`). The top-level site/ is the template and IS tracked.
 /examples/*/site/
 .cache/
 
 # Smoke test artefacts
-tests/.smoke/
+test/.smoke/
 
 # OS / editor
 .DS_Store

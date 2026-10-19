@@ -40,7 +40,7 @@ A few habits help the site later:
 3. Capture the **after** screenshot with the same URL, viewport, data and steps, so the two images line up in the slider.
 
 ```bash
-SHOT="node $(review-kit home)/capture/shot.mjs"
+SHOT="review-kit shot"
 $SHOT --url http://localhost:3000/settings --viewport mobile  --out .review/screenshots/fix-3/settings-mobile-before.png --steps open-danger.mjs
 # ... edit code ...
 $SHOT --url http://localhost:3000/settings --viewport mobile  --out .review/screenshots/fix-3/settings-mobile-after.png  --steps open-danger.mjs

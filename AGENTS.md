@@ -11,5 +11,5 @@ left. A review run only reports problems; apply fixes only for the issues the us
 Before starting, read the review-kit skill: run `review-kit home` and open `skill/review-kit/SKILL.md` in the
 folder it prints. It points to a playbook per review kind. If `review-kit` is not installed, install it with:
 
-    curl -fsSL https://raw.githubusercontent.com/NicholasErlin/review-kit/main/install.sh | bash
+    npm i -g @horus52/review-kit && review-kit setup
 <!-- review-kit:end -->

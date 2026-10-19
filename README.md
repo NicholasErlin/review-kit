@@ -7,7 +7,7 @@ There are two kinds of review. A **UI/UX review** records before/after screensho
 Agents using the skill **report first and fix only when told**. A review run records the problems and stops. Then you choose which issues to fix, for example "fix m-1 and m-3" or "do the P0s".
 
 - **One data file.** `review.json` holds issues, fixes and the plan. It follows a versioned format with a [JSON Schema](schema/review.schema.json) ([format reference](docs/format.md)).
-- **Zero dependencies.** It needs only Python 3.8+ (standard library). The site is vanilla HTML, CSS and JS: no CDN, no build step, and it works from `file://`.
+- **Zero dependencies.** It needs only Node.js 18+ (no runtime packages). The site is vanilla HTML, CSS and JS: no CDN, no build step, and it works from `file://`.
 - **Built for reviewing on a phone.** Bottom tabs, dark mode, a compare view (slider, tap to flip, or side by side), and a lightbox with pinch, wheel and double-tap zoom plus swipe. Issues can be filtered by platform, severity, status, area and text. Progress is broken down by severity and by platform.
 - **Agent-friendly.** Fix agents write small hand-off JSON files. The orchestrator merges them with `review-kit apply-pending`. See [docs/workflow.md](docs/workflow.md). An agent skill drives the whole loop for any coding agent (see [Agent skill](#agent-skill) below).
 
@@ -15,19 +15,19 @@ Agents using the skill **report first and fix only when told**. A review run rec
 
 ## Quick start
 
-**1. Install once per machine.** This clones the kit to `~/review-kit`, links `review-kit` into `~/.local/bin`, and links the agent skill into `~/.claude/skills/` if that folder exists:
+**1. Install once per machine.** This puts `review-kit` on your PATH, then `setup` links the agent skill into `~/.claude/skills/` if that folder exists:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NicholasErlin/review-kit/main/install.sh | bash
+npm i -g @horus52/review-kit && review-kit setup
 ```
 
-Run it again any time to update. If you already have a clone, run `./install.sh` from it instead. Options:
+Run the same line again to update; the skill is a symlink into the installed package, so it updates with it. Installing runs no scripts: the skill is only linked when you run `setup`. Options:
 
 - `--with-companions` also links the bundled [companion skills](#companion-skills) into the skills folders.
 - `--skills-dir DIR` links the skill into other agents' skills folders. Repeatable.
-- `--dir DIR` installs somewhere else.
 - `--no-skill` skips the skill.
- Without network access to the repo, `git clone` it however you can and run `install.sh` from the clone.
+
+For one-off use without installing, prefix any command with `npx`, for example `npx @horus52/review-kit build ui`.
 
 **2. Attach it to a repo once per project:**
 
@@ -48,7 +48,7 @@ review-kit add-issue backend --title "No size limit on uploads" --severity P1 --
 review-kit serve ui --watch                    # builds .review/ui/site and previews on localhost
 ```
 
-The first argument is a path to a `review.json` or its folder, or a kind (`ui`, `backend`) meaning `.review/<kind>/`. With no argument, commands look for `review.json`, `.review/review.json`, `docs/review/review.json` and `review/review.json`, then for a single `.review/<kind>/review.json`. You can also run the kit as `python3 -m reviewkit` from the repo root.
+The first argument is a path to a `review.json` or its folder, or a kind (`ui`, `backend`) meaning `.review/<kind>/`. With no argument, commands look for `review.json`, `.review/review.json`, `docs/review/review.json` and `review/review.json`, then for a single `.review/<kind>/review.json`. From a clone of this repository, run `npm install && npm run build`, then `node dist/cli.js <command>`.
 
 ## Commands
 
@@ -66,7 +66,9 @@ The first argument is a path to a `review.json` or its folder, or a kind (`ui`, 
 | `apply-pending [REVIEW]` | Merges every `pending/*.json` in natural order and renames each one to `*.applied.json`. It stops at the first file that would not validate. |
 | `clean [REVIEW] [--orphans] [--dry-run]` | Removes the built `site/` (only a folder review-kit built), and the `pending/*.applied.json` files that have been merged. `--orphans` also deletes screenshots that `review.json` no longer references, keeping any that unmerged `pending/*.json` files use. `--keep-site` and `--keep-applied` skip a part, and `--dry-run` only lists what would go. |
 | `companions [install\|update]` | Lists the companion skills for each kind and which copy will be used: an installed one if present, otherwise the bundled one. `install` links the bundled copies into `~/.claude/skills`, so the agent loads them as skills (`--skills-dir DIR` picks other folders). `update` is for maintainers and re-downloads the bundle from the pinned commits. `--kind` limits it to one kind, and `--path NAME` prints one skill's folder. |
-| `home` | Prints the folder the kit is installed in, for the docs, the skill and `capture/shot.mjs`. |
+| `shot` | Takes one Playwright screenshot for before/after evidence: `--url --out --viewport mobile\|tablet\|desktop\|WxH --full --dark --storage --steps --wait-for --wait --selector --quality`. See [Screenshots](#screenshots). |
+| `setup` | Links the agent skill into `~/.claude/skills` (when `~/.claude` exists) or into each `--skills-dir DIR`. An existing copy that is not a link is moved to `~/.review-kit-backups/` first. `--with-companions` also links the companion skills; `--no-skill` skips the skill. |
+| `home` | Prints the folder the kit is installed in, for the docs, the skill and the site template. |
 | `summary [REVIEW]` | Prints a Markdown progress summary: totals, counts by severity and platform, latest fixes, and the most severe open issues. |
 
 Image paths given on the command line or in hand-off files can be absolute. They are then copied into `screenshots/<fix-id>/` (or `screenshots/issues/`) and stored as relative paths.
@@ -102,10 +104,10 @@ The repository and newly initialized reviews ignore common environment, private-
 
 ## Screenshots
 
-`capture/shot.mjs` takes one Playwright screenshot. Playwright is resolved from the project you run it in, or from `PLAYWRIGHT_PATH`:
+`review-kit shot` takes one Playwright screenshot. Playwright is not a dependency of review-kit: it is resolved from the project you run the command in, then from `PLAYWRIGHT_PATH`:
 
 ```bash
-node "$(review-kit home)/capture/shot.mjs" --url http://localhost:3000/settings \
+review-kit shot --url http://localhost:3000/settings \
   --out .review/ui/screenshots/fix-3/settings-before-mobile.png --viewport mobile [--full] [--dark] \
   [--storage state.json] [--steps steps.mjs] [--wait-for "main"] [--selector ".dialog"]
 ```
@@ -115,25 +117,23 @@ Take the **before** shot before you edit any code. Then take the **after** shot 
 ## Layout
 
 ```
-install.sh                 installer and updater (kit, PATH link, agent skill, optional companion links)
-bin/review-kit             launcher (symlink-safe)
-reviewkit/                 Python package: cli, build, validate, markdown, images, edit, attach, companions, clean, serve, summary
-reviewkit/site/            the site template (index.html, app.css, app.js)
+src/                       TypeScript sources: cli, build, validate, markdown, images, edit, attach, companions, clean,
+                           serve, summary, setup, shot (compiled to dist/ by `npm run build`; dist/cli.js is the command)
+site/                      the site template (index.html, app.css, app.js)
 schema/review.schema.json  the format (version 1)
-capture/shot.mjs           Playwright screenshot helper
 docs/                      format reference, workflow and hand-off contract
 skill/review-kit/          agent skill: SKILL.md, plus ui-review.md and backend-review.md playbooks
 skill/companions/          bundled third-party skills (ui-ux-pro-max, wshobson/agents), each with LICENSE and SOURCE
 examples/demo/             small synthetic review (committed, self-contained)
 examples/basic-app/        a tiny real web app reviewed end to end by run.sh (committed output in review/)
-tests/                     unittest suites + Playwright smoke test
+test/                      node:test suites + Playwright smoke test
 ```
 
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests                     # unit tests (stdlib)
-PLAYWRIGHT_PATH=/path/to/node_modules/playwright node tests/smoke.mjs   # browser smoke test: demo at 412x915, 1440x900 and dark mode
+npm test                                                               # build, then the unit tests (node:test)
+PLAYWRIGHT_PATH=/path/to/node_modules/playwright node test/smoke.mjs   # browser smoke test: demo at 412x915, 1440x900 and dark mode
 ```
 
 ## Agent skill
@@ -142,7 +142,7 @@ PLAYWRIGHT_PATH=/path/to/node_modules/playwright node tests/smoke.mjs   # browse
 
 The file uses the `SKILL.md` format: a short YAML header (`name`, `description`) followed by Markdown instructions. There are three ways to give it to an agent:
 
-- **Agents that load `SKILL.md` skills:** `install.sh` symlinks the skill folder into `~/.claude/skills/` (Claude Code) when it exists. For other agents, pass their skills folder: `./install.sh --skills-dir <folder>`. Check the agent's docs for where user-level skills live. Because it is a symlink, updating the kit updates the skill.
+- **Agents that load `SKILL.md` skills:** `review-kit setup` symlinks the skill folder into `~/.claude/skills/` (Claude Code) when it exists. For other agents, pass their skills folder: `review-kit setup --skills-dir <folder>`. Check the agent's docs for where user-level skills live. Because it is a symlink, updating the package updates the skill.
 - **Agents that read a project instructions file such as `AGENTS.md`:** `review-kit attach` writes a pointer that tells the agent to read the skill (found with `review-kit home`) and how to install the kit if it's missing. Point `--agents-file` at a rules or custom-instructions file if your agent uses a different name.
 - **Any other agent:** paste the body of `SKILL.md` into its prompt or task, or tell it to read `$(review-kit home)/skill/review-kit/SKILL.md` first.
 
@@ -163,9 +163,9 @@ review-kit companions install              # link the bundled copies into ~/.cla
 review-kit companions install --kind ui --skills-dir ~/.agents/skills
 ```
 
-- Agents read the bundled copies through `review-kit companions` even when the skills aren't installed. `install` (or `install.sh --with-companions`) only makes them load as skills in their own right.
+- Agents read the bundled copies through `review-kit companions` even when the skills aren't installed. `install` (or `review-kit setup --with-companions`) only makes them load as skills in their own right.
 - An install never replaces a skill you already have; it only reports it. If you installed the same skill another way, for example as a Claude Code plugin, `review-kit companions` uses that copy.
-- To move to newer upstream versions, bump the commit hashes in `reviewkit/companions.py`, run `review-kit companions update`, and review the diff.
+- To move to newer upstream versions, bump the commit hashes in `src/companions.ts`, rebuild, run `review-kit companions update`, and review the diff.
 
 ## License
 
