@@ -11,7 +11,7 @@ export { ReviewError };
 /** The package root: the folder holding dist/, site/, schema/, skill/ and docs/. */
 export const ROOT = dirname(dirname(abspath(fileURLToPath(import.meta.url))));
 export const SCHEMA_PATH = join(ROOT, 'schema', 'review.schema.json');
-export const SCHEMA_URL = 'https://unpkg.com/@horus52/review-kit/schema/review.schema.json';
+export const SCHEMA_URL = 'https://raw.githubusercontent.com/NicholasErlin/review-kit/main/schema/review.schema.json';
 export const SITE_SRC = join(ROOT, 'site');
 
 export const DEFAULT_SEVERITIES = [

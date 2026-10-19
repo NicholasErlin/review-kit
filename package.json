@@ -13,7 +13,15 @@
     "cli"
   ],
   "license": "MIT",
-  "author": "horus52",
+  "author": "Nicholas Erlin",
+  "homepage": "https://github.com/NicholasErlin/review-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NicholasErlin/review-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NicholasErlin/review-kit/issues"
+  },
   "type": "module",
   "bin": {
     "review-kit": "dist/cli.js"
