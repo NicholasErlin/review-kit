@@ -8,6 +8,7 @@ Agents using the skill **report first and fix only when told**. A review run rec
 
 - **One data file.** `review.json` holds issues, fixes and the plan. It follows a versioned format with a [JSON Schema](schema/review.schema.json) ([format reference](docs/format.md)).
 - **Zero dependencies.** It needs only Node.js 18+ (no runtime packages). The site is vanilla HTML, CSS and JS: no CDN, no build step, and it works from `file://`.
+- **One site for both reviews.** With a UI/UX and a backend review in the same repo, `review-kit build` (or `serve --watch`) publishes one site with a UI/UX / Backend switch in the header and a combined overview of both.
 - **Built for reviewing on a phone.** Bottom tabs, dark mode, a compare view (slider, tap to flip, or side by side), and a lightbox with pinch, wheel and double-tap zoom plus swipe. Issues can be filtered by platform, severity, status, area and text. Progress is broken down by severity and by platform.
 - **Agent-friendly.** Fix agents write small hand-off JSON files. The orchestrator merges them with `review-kit apply-pending`. See [docs/workflow.md](docs/workflow.md). An agent skill drives the whole loop for any coding agent (see [Agent skill](#agent-skill) below).
 
@@ -36,7 +37,7 @@ cd your-project
 review-kit attach --name "Your App" --kind ui,backend      # or just --kind ui (the default) or --kind backend
 ```
 
-This creates one review per kind, `.review/ui/` and `.review/backend/`. Each has a `review.json`, `screenshots/`, `pending/`, and a `.gitignore` for the built site. UI reviews default to `--platforms mobile,desktop`. It also adds a short pointer to the repo's `AGENTS.md`, and to `CLAUDE.md` if there is one, so any coding agent in the repo knows to use the skill. Commit those files to share the setup with your team. Re-running `attach` is safe: it reuses the review and updates the pointer in place. `--no-agents-file` skips the pointer, and `--agents-file FILE` picks other files.
+This creates one review per kind, `.review/ui/` and `.review/backend/`. Each has a `review.json`, `screenshots/`, `pending/`, and a `.gitignore` for the built site; with both kinds, `.review/.gitignore` also ignores the combined site. UI reviews default to `--platforms mobile,desktop`. It also adds a short pointer to the repo's `AGENTS.md`, and to `CLAUDE.md` if there is one, so any coding agent in the repo knows to use the skill. Commit those files to share the setup with your team. Re-running `attach` is safe: it reuses the review and updates the pointer in place. `--no-agents-file` skips the pointer, and `--agents-file FILE` picks other files.
 
 **3. Use it.** Ask your agent for a review ("run review-kit on the UI"). It reports the issues and waits. Then tell it which to fix, and it records each fix with its evidence. You can also drive it yourself:
 
@@ -45,10 +46,11 @@ review-kit add-issue ui --title "Save is hidden behind the bottom nav" --platfor
 review-kit add-fix ui --title "Sticky Save bar" --files src/Form.tsx \
   --pair mobile before.png after.png --resolves m-1
 review-kit add-issue backend --title "No size limit on uploads" --severity P1 --area api --where "api/upload.py:40"
-review-kit serve ui --watch                    # builds .review/ui/site and previews on localhost
+review-kit serve --watch                       # both reviews in one site (.review/site), previewed on localhost
+review-kit serve ui --watch                    # or just one: builds .review/ui/site
 ```
 
-The first argument is a path to a `review.json` or its folder, or a kind (`ui`, `backend`) meaning `.review/<kind>/`. With no argument, commands look for `review.json`, `.review/review.json`, `docs/review/review.json` and `review/review.json`, then for a single `.review/<kind>/review.json`. From a clone of this repository, run `npm install && npm run build`, then `node dist/cli.js <command>`.
+The first argument is a path to a `review.json` or its folder, or a kind (`ui`, `backend`) meaning `.review/<kind>/`. With no argument, commands look for `review.json`, `.review/review.json`, `docs/review/review.json` and `review/review.json`, then for `.review/<kind>/review.json` (and `docs/review/<kind>/`). `build`, `serve` and `clean` act on all of them when there are several; commands that edit a review ask you to pick one. From a clone of this repository, run `npm install && npm run build`, then `node dist/cli.js <command>`.
 
 ## Commands
 
@@ -57,14 +59,14 @@ The first argument is a path to a `review.json` or its folder, or a kind (`ui`, 
 | `attach [REPO]` | Sets a repo up in one step. For each `--kind` (`ui`, `backend`; default `ui`), it creates `.review/<kind>/` unless that review already exists; `--dir` changes the parent folder. It then adds or updates a review-kit pointer in `AGENTS.md`, plus `CLAUDE.md` if present. `--agents-file FILE` (repeatable) and `--no-agents-file` change which files get the pointer. |
 | `init [DIR]` | Scaffolds `DIR/review.json`, `screenshots/`, `pending/` and a `.gitignore`. DIR defaults to `.review`. Options: `--kind ui\|backend` (sets the title and platform defaults), `--name`, `--title`, `--platforms a,b`, `--accent "#hex"`, `--ignore-screenshots`. |
 | `validate [REVIEW]` | Checks the file against the schema and its cross-references: unknown platforms, severities, issue or fix ids, duplicate ids and missing images. |
-| `build [REVIEW] [--out DIR]` | Validates, copies the referenced images, and writes `index.html`, `app.css`, `app.js` and `data.js`. The output goes to `site/` next to `review.json` by default. `--max-width N` downscales PNG/JPEG with `sips` or ImageMagick when available. Without them, images are copied unchanged. |
-| `serve [REVIEW\|SITE] [--port 8787] [--host 127.0.0.1] [--watch]` | Builds, then previews locally. Bound to `127.0.0.1` (the default), it only answers requests addressed to `localhost`, `127.0.0.1` or `[::1]`, which blocks DNS-rebinding pages. Add `--host 0.0.0.0` to share on your network without a login. `--watch` rebuilds when `review.json` or `screenshots/` change. |
+| `build [REVIEW...] [--out DIR]` | Validates, copies the referenced images, and writes `index.html`, `app.css`, `app.js` and `data.js`. One review goes to `site/` next to its `review.json` by default. Several reviews (found with no argument, given one by one as in `build ui backend`, or as their parent folder as in `build .review`) build **one combined site** in their parent folder, `.review/site/`, with a switch between them; `build ui` still builds just that review. `--max-width N` downscales PNG/JPEG with `sips` or ImageMagick when available. Without them, images are copied unchanged. |
+| `serve [REVIEW...\|SITE] [--port 8787] [--host 127.0.0.1] [--watch]` | Builds, then previews locally; with several reviews it serves the combined site. Bound to `127.0.0.1` (the default), it only answers requests addressed to `localhost`, `127.0.0.1` or `[::1]`, which blocks DNS-rebinding pages. Add `--host 0.0.0.0` to share on your network without a login. `--watch` rebuilds when any served `review.json` or its `screenshots/` change. |
 | `add-issue` | Adds issues from flags (`--title --platform --severity --area --status --details --note --where --screenshot --top`) or from `--json`/`--file`, which take one object or a list. `--update` merges into an existing id. |
 | `add-fix` | Adds a fix from flags (`--title --summary --files --pair PLATFORM BEFORE AFTER --resolves ids --partial ids --commit --link Label=URL`) or from `--json`/`--file`. The JSON can be a bare fix or a hand-off envelope. It assigns the next number and today's date. |
 | `add-plan` | Adds a roadmap item: `--group --title --phase --status --effort --files --severity`. |
 | `mark [REVIEW] STATUS ID...` | Sets the status of issues (`open partial fixed notabug wontfix`) or plan items (`todo doing partial done dropped`). `--note` adds a note and `--fix` links the item to a fix. |
 | `apply-pending [REVIEW]` | Merges every `pending/*.json` in natural order and renames each one to `*.applied.json`. It stops at the first file that would not validate. |
-| `clean [REVIEW] [--orphans] [--dry-run]` | Removes the built `site/` (only a folder review-kit built), and the `pending/*.applied.json` files that have been merged. `--orphans` also deletes screenshots that `review.json` no longer references, keeping any that unmerged `pending/*.json` files use. `--keep-site` and `--keep-applied` skip a part, and `--dry-run` only lists what would go. |
+| `clean [REVIEW...] [--orphans] [--dry-run]` | Removes the built `site/` (only a folder review-kit built), and the `pending/*.applied.json` files that have been merged. With several reviews it also removes the combined `.review/site/`. `--orphans` also deletes screenshots that `review.json` no longer references, keeping any that unmerged `pending/*.json` files use. `--keep-site` and `--keep-applied` skip a part, and `--dry-run` only lists what would go. |
 | `companions [install\|update]` | Lists the companion skills for each kind and which copy will be used: an installed one if present, otherwise the bundled one. `install` links the bundled copies into `~/.claude/skills`, so the agent loads them as skills (`--skills-dir DIR` picks other folders). `update` is for maintainers and re-downloads the bundle from the pinned commits. `--kind` limits it to one kind, and `--path NAME` prints one skill's folder. |
 | `shot` | Takes one Playwright screenshot for before/after evidence: `--url --out --viewport mobile\|tablet\|desktop\|WxH --full --dark --storage --steps --wait-for --wait --selector --quality`. See [Screenshots](#screenshots). |
 | `setup` | Links the agent skill into `~/.claude/skills` (when `~/.claude` exists) or into each `--skills-dir DIR`. An existing copy that is not a link is moved to `~/.review-kit-backups/` first. `--with-companions` also links the companion skills; `--no-skill` skips the skill. |
@@ -82,11 +84,22 @@ Image paths given on the command line or in hand-off files can be absolute. They
 `serve` is a normal foreground process. To keep it alive after the terminal or an agent's tool call ends, detach it:
 
 ```bash
-nohup review-kit serve .review/ui/review.json --port 8787 --watch > /tmp/review-kit.log 2>&1 &
+nohup review-kit serve --port 8787 --watch > /tmp/review-kit.log 2>&1 &   # every review in .review/, one site
 disown
 ```
 
 You can also build once and serve `site/` with any static server, or open `site/index.html` directly.
+
+## One site for several reviews
+
+When a repo has more than one review (usually `.review/ui/` and `.review/backend/`), `build` and `serve` with no argument publish them together in `.review/site/`:
+
+- The header has a switch: **All** (an overview with each review's progress side by side), **UI/UX** and **Backend**, in that order. It is a row of links, so it works with the keyboard; on phones it gets its own full-width row with 44px targets.
+- Each review keeps its own Overview, Fixes, Issues and Plan tabs, filters, accent colour and title. Switching review keeps the tab you are on.
+- Links include the review: `#/backend/issues/issue-3` opens that issue in the backend review. Single-review sites keep their old links (`#/issues/issue-3`).
+- `data.js` holds `window.REVIEWS = [{key, label, data}, ...]`, and each review's images and attachments are copied under `img/<key>/` and `files/<key>/`, so equal file names never collide.
+
+The security model is the same as for one review: sanitised content, the Content Security Policy, a manifest of the files the server may send, and a builder that refuses unexpected files in the output folder.
 
 ## Privacy and publishing
 
@@ -133,7 +146,7 @@ test/                      node:test suites + Playwright smoke test
 
 ```bash
 npm test                                                               # build, then the unit tests (node:test)
-PLAYWRIGHT_PATH=/path/to/node_modules/playwright node test/smoke.mjs   # browser smoke test: demo at 412x915, 1440x900 and dark mode
+PLAYWRIGHT_PATH=/path/to/node_modules/playwright node test/smoke.mjs   # browser smoke test: demo at 412x915, 1440x900, dark mode, and a combined UI/UX + Backend site
 ```
 
 ## Agent skill

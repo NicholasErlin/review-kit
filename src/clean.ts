@@ -80,6 +80,14 @@ function rmtree(path: string): void {
   fs.rmSync(path, { recursive: true });
 }
 
+/** Remove a built site folder, but only one that carries build.MARKER. Returns [removed, skipped]. */
+export function cleanSite(out: string, dryRun = false): [string[], string[]] {
+  if (!isdir(out)) return [[], []];
+  if (!fs.existsSync(join(out, MARKER))) return [[], [`${relpath(out)}: not built by review-kit (no ${MARKER}); left alone`]];
+  if (!dryRun) rmtree(out);
+  return [[relpath(out) + '/'], []];
+}
+
 export interface CleanOptions {
   out?: string | null;
   site?: boolean;
@@ -96,13 +104,9 @@ export function clean(reviewPath: string, opts: CleanOptions = {}): [string[], s
   const skipped: string[] = [];
 
   if (site) {
-    const out = abspath(opts.out || join(base, 'site'));
-    if (isdir(out)) {
-      if (fs.existsSync(join(out, MARKER))) {
-        removed.push(relpath(out) + '/');
-        if (!dryRun) rmtree(out);
-      } else skipped.push(`${relpath(out)}: not built by review-kit (no ${MARKER}); left alone`);
-    }
+    const [r, s] = cleanSite(abspath(opts.out || join(base, 'site')), dryRun);
+    removed.push(...r);
+    skipped.push(...s);
   }
 
   if (applied) {

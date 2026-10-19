@@ -110,11 +110,13 @@ cat /tmp/review-kit.log              # localhost URL; local access only by defau
 review-kit summary                   # Markdown summary for a status update or PR description
 ```
 
+With a single review the site is `site/` next to its `review.json`. When `.review/` holds several reviews (`ui/` and `backend/`), `build` and `serve` with no argument build **one site for all of them** in `.review/site/`, with a UI/UX / Backend switch in the header and an overview of both. `build ui` (or a path) still builds one review on its own, and `--out` picks another folder. `--watch` then rebuilds when any of the reviews changes.
+
 For a phone preview, explicitly enable network sharing with `--host 0.0.0.0`, then use the LAN or Tailscale URL from the log. Anyone who can reach that port can read the review; use an authenticated host for private remote reviews.
 
 `--watch` rebuilds the site when `review.json` or `screenshots/` change. Browsers pick up changes on reload because `index.html` and `data.js` are served with `Cache-Control: no-cache` and every asset carries a content hash. Publish only the generated site folder after checking review text, screenshots and attachments for private information. If the builder finds unexpected files or symlinks in the output, use a fresh `--out` folder; it leaves the existing files untouched. Keep Playwright `--storage` session files outside published output and out of Git.
 
-When a round is finished, `review-kit clean` removes the built `site/` and the merged `pending/*.applied.json` files. `review-kit clean --orphans` also deletes screenshots that `review.json` no longer references, for example retakes or files from a fix you dropped. Screenshots that unmerged `pending/*.json` files reference are kept. If a pending file can't be read, `--orphans` stops without deleting anything. Add `--dry-run` to see the list first. `clean` only removes a site folder that review-kit built, and it never edits `review.json`.
+When a round is finished, `review-kit clean` removes the built `site/` and the merged `pending/*.applied.json` files (with several reviews: each review's and the combined `.review/site/`). `review-kit clean --orphans` also deletes screenshots that `review.json` no longer references, for example retakes or files from a fix you dropped. Screenshots that unmerged `pending/*.json` files reference are kept. If a pending file can't be read, `--orphans` stops without deleting anything. Add `--dry-run` to see the list first. `clean` only removes a site folder that review-kit built, and it never edits `review.json`.
 
 [`examples/basic-app/run.sh`](../examples/basic-app/run.sh) runs every step of this guide on a small app.
 

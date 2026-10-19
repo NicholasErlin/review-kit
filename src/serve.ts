@@ -5,7 +5,7 @@ import dns from 'node:dns';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { build as buildSite, MARKER } from './build.js';
+import { buildAny as buildSite, MARKER } from './build.js';
 import { escape } from './htmlparser.js';
 import { eprint, io, print } from './io.js';
 import { ReviewError } from './errors.js';
@@ -323,13 +323,18 @@ export function tailscale(ip: string): boolean {
   return a === 100 && b >= 64 && b <= 127; // 100.64.0.0/10 (CGNAT range used by Tailscale)
 }
 
-/** [path, mtime] of review.json and every screenshot, so edits, additions and deletions all count as changes. */
-export function snapshot(reviewPath: string): string {
-  const base = dirname(abspath(reviewPath));
-  const stamp: [string, number][] = [[reviewPath, fs.statSync(reviewPath).mtimeMs]];
-  const d = join(base, 'screenshots');
-  if (isdir(d)) {
-    for (const [dp, , fsn] of walk(d)) for (const f of fsn) stamp.push([join(dp, f), fs.statSync(join(dp, f)).mtimeMs]);
+/**
+ * [path, mtime] of each review.json and every screenshot, so edits, additions and deletions all count as changes.
+ * Several reviews (one combined site) are watched together.
+ */
+export function snapshot(reviewPath: string | string[]): string {
+  const stamp: [string, number][] = [];
+  for (const p of typeof reviewPath === 'string' ? [reviewPath] : reviewPath) {
+    stamp.push([p, fs.statSync(p).mtimeMs]);
+    const d = join(dirname(abspath(p)), 'screenshots');
+    if (isdir(d)) {
+      for (const [dp, , fsn] of walk(d)) for (const f of fsn) stamp.push([join(dp, f), fs.statSync(join(dp, f)).mtimeMs]);
+    }
   }
   return JSON.stringify(stamp.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1])));
 }
@@ -359,7 +364,7 @@ function describe(e: unknown): string {
 }
 
 /** Rebuild once. Never throws: one failed rebuild must not stop watching. */
-export function rebuild(reviewPath: string, out: string, maxWidth: number | null, build = buildSite): boolean {
+export function rebuild(reviewPath: string | string[], out: string, maxWidth: number | null, build = buildSite): boolean {
   try {
     build(reviewPath, out, { maxWidth, quiet: true });
   } catch (e) {
@@ -371,7 +376,7 @@ export function rebuild(reviewPath: string, out: string, maxWidth: number | null
   return true;
 }
 
-function watch(reviewPath: string, out: string, maxWidth: number | null, interval = 1000): void {
+function watch(reviewPath: string | string[], out: string, maxWidth: number | null, interval = 1000): void {
   let last = snapshot(reviewPath);
   const timer = setInterval(() => {
     let now: string;
@@ -396,7 +401,7 @@ function lookup4(host: string): Promise<string> {
 }
 
 export interface ServeOptions {
-  reviewPath?: string | null;
+  reviewPath?: string | string[] | null;
   watch?: boolean;
   maxWidth?: number | null;
 }
@@ -448,7 +453,8 @@ export async function serve(directory: string, host = '127.0.0.1', port = 8787, 
   } else if (host !== '127.0.0.1' && host !== 'localhost') print(`  network: http://${host}:${port}/`);
   if (opts.watch && opts.reviewPath) {
     watch(opts.reviewPath, directory, opts.maxWidth ?? null);
-    print(`  watching ${opts.reviewPath} for changes`);
+    const watched = typeof opts.reviewPath === 'string' ? [opts.reviewPath] : opts.reviewPath;
+    print(`  watching ${watched.join(', ')} for changes`);
   }
   print('Ctrl+C to stop.');
   return server;

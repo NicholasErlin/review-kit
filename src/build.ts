@@ -41,15 +41,17 @@ export class Assets {
   cache = new Map<string, Record<string, any>>();
   stats: Stats = { copied: 0, resized: 0, kept: 0 };
 
-  constructor(base: string, out: string, public maxWidth: number | null, public tool: string | null) {
+  /** `ns` namespaces the copies (img/<ns>/..., files/<ns>/...) so several reviews can share one site. */
+  constructor(base: string, out: string, public maxWidth: number | null, public tool: string | null, public ns = '') {
     this.base = realpath(base);
     this.out = realpath(out);
   }
 
-  private dest(absSrc: string, folder: string): string {
+  private dest(absSrc: string, kind: string): string {
     const rel = relpath(absSrc, this.base);
     if (rel.startsWith('..') || isabs(rel)) throw new ReviewError('asset must stay inside the review folder');
     const safe = rel.replace(/[^A-Za-z0-9._/-]/gu, '_');
+    const folder = this.ns ? `${kind}/${this.ns}` : kind;
     let dest = `${folder}/${safe}`;
     const prev = this.files.get(dest);
     if (prev !== undefined && prev !== absSrc) {
@@ -87,22 +89,32 @@ export class Assets {
   }
 
   write(): void {
+    this.publish();
+    prune(this.out, this.files.keys());
+  }
+
+  /** Copy (or resize) every recorded file into the site. */
+  publish(): void {
     for (const [dest, src] of this.files) {
       const target = join(this.out, dest);
       const mw = dest.startsWith('img/') ? this.maxWidth : null;
       this.stats[images.publish(src, target, mw, this.tool)] += 1;
     }
-    for (const folder of ['img', 'files']) {
-      const root = join(this.out, folder);
-      if (!isdir(root)) continue;
-      const keep = new Set([...this.files.keys()].map((d) => normpath(join(this.out, d))));
-      for (const [dirpath, , filenames] of walk(root, false)) {
-        for (const n of filenames) {
-          const p = normpath(join(dirpath, n));
-          if (!keep.has(p)) fs.unlinkSync(p);
-        }
-        if (dirpath !== root && !listdir(dirpath).length) fs.rmdirSync(dirpath);
+  }
+}
+
+/** Remove files under out/img and out/files that are not in `dests` (site-relative paths), then empty folders. */
+function prune(out: string, dests: Iterable<string>): void {
+  const keep = new Set([...dests].map((d) => normpath(join(out, d))));
+  for (const folder of ['img', 'files']) {
+    const root = join(out, folder);
+    if (!isdir(root)) continue;
+    for (const [dirpath, , filenames] of walk(root, false)) {
+      for (const n of filenames) {
+        const p = normpath(join(dirpath, n));
+        if (!keep.has(p)) fs.unlinkSync(p);
       }
+      if (dirpath !== root && !listdir(dirpath).length) fs.rmdirSync(dirpath);
     }
   }
 }
@@ -248,14 +260,7 @@ export interface BuildOptions {
   clean?: boolean;
 }
 
-/** Validate reviewPath and write the site to out. Returns a stats object. */
-export function build(reviewPath: string, out: string, opts: BuildOptions = {}): Record<string, any> {
-  const { maxWidth = null, force = false, checkFiles = true, quiet = false, clean = false } = opts;
-  const data = model.load(reviewPath);
-  const base = model.baseDir(reviewPath);
-  const [errors, warnings] = validate.validate(data, base, checkFiles);
-  if (errors.length) throw new ReviewError('validation failed:\n  ' + errors.join('\n  '));
-  checkOut(out, base, reviewPath, force);
+function prepareOut(out: string, clean: boolean): void {
   if (clean && isdir(out)) {
     for (const folder of ['img', 'files']) {
       try {
@@ -266,40 +271,148 @@ export function build(reviewPath: string, out: string, opts: BuildOptions = {}):
     }
   }
   fs.mkdirSync(out, { recursive: true });
-  const tool = maxWidth ? images.resizer() : null;
-  const assets = new Assets(base, abspath(out), maxWidth, tool);
-  const site = compileData(data, base, assets);
-  assets.write();
-  const payload = 'window.REVIEW = ' + dumps(site, null) + ';\n';
+}
+
+/** Write data.js, the page templates and the manifest. */
+function writeSite(out: string, payload: string, title: string, accent: string, assetFiles: string[]): void {
   model.writeText(join(out, 'data.js'), payload); // atomic: `serve --watch` may be reading it
   let verSrc = payload;
   for (const name of ['index.html', 'app.css', 'app.js']) verSrc += readText(join(model.SITE_SRC, name));
   const ver = crypto.createHash('sha1').update(verSrc, 'utf8').digest('hex').slice(0, 10);
-  const proj = site.project;
-  const title = strip(`${S(proj.name)} ${S(proj.title)}`);
   for (const name of ['index.html', 'app.css', 'app.js']) {
     let s = readText(join(model.SITE_SRC, name)).split('__VER__').join(ver);
-    if (name === 'index.html') s = s.split('__TITLE__').join(escape(title)).split('__ACCENT__').join(proj.theme.accent);
+    if (name === 'index.html') s = s.split('__TITLE__').join(escape(title)).split('__ACCENT__').join(accent);
     model.writeText(join(out, name), s);
   }
-  model.save(join(out, MARKER), { version: 1, files: ['index.html', 'app.css', 'app.js', 'data.js', ...sorted(assets.files.keys())] });
+  model.save(join(out, MARKER), { version: 1, files: ['index.html', 'app.css', 'app.js', 'data.js', ...sorted(assetFiles)] });
+}
+
+/** Counts for one compiled review, as build() returns them. */
+function siteStats(site: Record<string, any>, assets: Assets): Record<string, any> {
   const counted = site.issues.filter((i: any) => truthy(i.counted));
   const stats: Record<string, any> = {
     issues: counted.length, summary_rows: site.issues.length - counted.length, fixes: site.fixes.length,
     pairs: site.fixes.reduce((n: number, fx: any) => n + Object.values(fx.platforms).reduce((m: number, p: any) => m + p.pairs.length, 0), 0),
     images: [...assets.files.keys()].filter((d) => d.startsWith('img/')).length,
     plan_items: site.plan.reduce((n: number, g: any) => n + g.items.length, 0),
-    status: {} as Record<string, number>, warnings, assets: assets.stats, resizer: tool, out: abspath(out),
+    status: {} as Record<string, number>,
   };
   for (const i of counted) stats.status[i.status] = (stats.status[i.status] || 0) + 1;
+  return stats;
+}
+
+function statsLine(stats: Record<string, any>, assets: Stats): string {
+  const st = Object.keys(stats.status).sort(cmpStr).map((k) => `${stats.status[k]} ${k}`).join(', ');
+  return `${stats.issues} issues (${st || 'none'}), ${stats.fixes} fixes with ${stats.pairs} before/after pairs, `
+    + `${stats.plan_items} plan items, ${stats.images} images `
+    + `(${assets.copied} copied, ${assets.resized} resized, ${assets.kept} unchanged)`;
+}
+
+/** Load and validate one review; throws on validation errors. Returns [data, base, warnings]. */
+function loadValid(reviewPath: string, checkFiles: boolean, label = ''): [any, string, string[]] {
+  const data = model.load(reviewPath);
+  const base = model.baseDir(reviewPath);
+  const [errors, warnings] = validate.validate(data, base, checkFiles);
+  if (errors.length) throw new ReviewError(`${label ? reviewPath + ': ' : ''}validation failed:\n  ` + errors.join('\n  '));
+  return [data, base, warnings];
+}
+
+/** Validate reviewPath and write the site to out. Returns a stats object. */
+export function build(reviewPath: string, out: string, opts: BuildOptions = {}): Record<string, any> {
+  const { maxWidth = null, force = false, checkFiles = true, quiet = false, clean = false } = opts;
+  const [data, base, warnings] = loadValid(reviewPath, checkFiles);
+  checkOut(out, base, reviewPath, force);
+  prepareOut(out, clean);
+  const tool = maxWidth ? images.resizer() : null;
+  const assets = new Assets(base, abspath(out), maxWidth, tool);
+  const site = compileData(data, base, assets);
+  assets.write();
+  const proj = site.project;
+  writeSite(out, 'window.REVIEW = ' + dumps(site, null) + ';\n', strip(`${S(proj.name)} ${S(proj.title)}`),
+    proj.theme.accent, [...assets.files.keys()]);
+  const stats = siteStats(site, assets);
+  Object.assign(stats, { warnings, assets: assets.stats, resizer: tool, out: abspath(out) });
   if (!quiet) {
     for (const w of warnings) print('warning:', w);
-    const st = Object.keys(stats.status).sort(cmpStr).map((k) => `${stats.status[k]} ${k}`).join(', ');
-    print(`${stats.issues} issues (${st || 'none'}), ${stats.fixes} fixes with ${stats.pairs} before/after pairs, `
-      + `${stats.plan_items} plan items, ${stats.images} images `
-      + `(${assets.stats.copied} copied, ${assets.stats.resized} resized, ${assets.stats.kept} unchanged)`);
+    print(statsLine(stats, assets.stats));
     if (maxWidth && !tool) print('note: no resize tool (sips/magick/convert) found; images copied at full size');
     print('site ->', join(stats.out, 'index.html'));
   }
   return stats;
+}
+
+// ---------------------------------------------------------------- several reviews in one site
+/** Switch labels and order for the review kinds; other kinds sort after these, labelled by their title. */
+export const KIND_ORDER = ['ui', 'backend'];
+export const KIND_LABELS: Record<string, string> = { ui: 'UI/UX', backend: 'Backend' };
+const RESERVED_KEYS = new Set(['', 'all', 'overview', 'fixes', 'issues', 'plan']);
+
+export interface ReviewRef { path: string; key: string; label: string; kind: string; data: any; base: string; warnings: string[] }
+
+/** Load and validate several reviews, order them (ui, then backend, then the rest) and give each a unique hash key. */
+export function loadReviews(reviewPaths: string[], checkFiles = true): ReviewRef[] {
+  const refs = reviewPaths.map((p) => {
+    const [data, base, warnings] = loadValid(p, checkFiles, p);
+    const kind = String(dget(data.project, 'kind', 'ui'));
+    return { path: p, key: '', label: '', kind, data, base, warnings };
+  });
+  const rank = (k: string) => (KIND_ORDER.includes(k) ? KIND_ORDER.indexOf(k) : KIND_ORDER.length);
+  const order = refs.map((r, i) => [r, i] as [ReviewRef, number]).sort((a, b) => rank(a[0].kind) - rank(b[0].kind) || a[1] - b[1]);
+  const keys = new Set<string>();
+  const labels = new Set<string>();
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/gu, '-').replace(/^-+|-+$/gu, '');
+  const out = order.map(([r]) => {
+    let key = slug(r.kind);
+    if (keys.has(key) || RESERVED_KEYS.has(key)) key = slug(r.base.split('/').pop() || '') || 'review';
+    for (let n = 2, k0 = key; keys.has(key) || RESERVED_KEYS.has(key); n++) key = `${k0}-${n}`;
+    keys.add(key);
+    let label = has(KIND_LABELS, r.kind) ? KIND_LABELS[r.kind] : S(dget(r.data.project, 'title', 'Review'));
+    if (labels.has(label)) label = S(dget(r.data.project, 'title', '')) || key;
+    labels.add(label);
+    return { ...r, key, label };
+  });
+  return out;
+}
+
+/** Validate several reviews and write ONE site (window.REVIEWS) to out, assets namespaced per review. */
+export function buildCombined(reviewPaths: string[], out: string, opts: BuildOptions = {}): Record<string, any> {
+  const { maxWidth = null, force = false, checkFiles = true, quiet = false, clean = false } = opts;
+  if (reviewPaths.length < 2) throw new ReviewError('a combined site needs at least two reviews');
+  const refs = loadReviews(reviewPaths, checkFiles);
+  for (const r of refs) checkOut(out, r.base, r.path, force);
+  prepareOut(out, clean);
+  const tool = maxWidth ? images.resizer() : null;
+  const compiled = refs.map((r) => {
+    const assets = new Assets(r.base, abspath(out), maxWidth, tool, r.key);
+    return { r, assets, site: compileData(r.data, r.base, assets) };
+  });
+  const dests: string[] = [];
+  for (const c of compiled) {
+    c.assets.publish();
+    dests.push(...c.assets.files.keys());
+  }
+  prune(abspath(out), dests);
+  const reviews = compiled.map((c) => ({ key: c.r.key, label: c.r.label, data: c.site }));
+  const names = [...new Set(compiled.map((c) => strip(S(c.site.project.name))))];
+  const title = names.length === 1 ? `${names[0]} reviews` : 'Reviews';
+  writeSite(out, 'window.REVIEWS = ' + dumps(reviews, null) + ';\n', title, compiled[0].site.project.theme.accent, dests);
+  const per = compiled.map((c) => ({
+    key: c.r.key, label: c.r.label, path: c.r.path, ...siteStats(c.site, c.assets), warnings: c.r.warnings, assets: c.assets.stats,
+  }));
+  const stats: Record<string, any> = { reviews: per, resizer: tool, out: abspath(out) };
+  if (!quiet) {
+    for (const p of per) {
+      for (const w of p.warnings) print(`warning: ${p.label}:`, w);
+      print(`${p.label}: ${statsLine(p, p.assets)}`);
+    }
+    if (maxWidth && !tool) print('note: no resize tool (sips/magick/convert) found; images copied at full size');
+    print('site ->', join(stats.out, 'index.html'));
+  }
+  return stats;
+}
+
+/** build() for one review, buildCombined() for several. */
+export function buildAny(reviewPaths: string | string[], out: string, opts: BuildOptions = {}): Record<string, any> {
+  const paths = typeof reviewPaths === 'string' ? [reviewPaths] : reviewPaths;
+  return paths.length === 1 ? build(paths[0], out, opts) : buildCombined(paths, out, opts);
 }

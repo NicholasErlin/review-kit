@@ -140,6 +140,10 @@ export function attach(repo = '.', opts: AttachOptions = {}): string[] {
     if (existing) reviews.push([k, relpath(dirname(existing), repo)]);
   }
   reviews.sort((a, b) => KINDS.indexOf(a[0]) - KINDS.indexOf(b[0]));
+  // Several reviews build into one combined site at <directory>/site/: keep it out of git too.
+  if (reviews.length > 1 && edit.ignoreCombinedSite(join(repo, directory))) {
+    log.push(`${relpath(join(repo, directory, '.gitignore'), repo)}: ignores the combined site/`);
+  }
 
   if (agentFiles === null) agentFiles = ['AGENTS.md', ...(isfile(join(repo, 'CLAUDE.md')) ? ['CLAUDE.md'] : [])];
   const block = pointer(reviews);

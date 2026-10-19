@@ -66,6 +66,23 @@ export function init(directory: string, name: string, title = 'Review', platform
   return path;
 }
 
+/**
+ * Make <parent>/.gitignore ignore site/, where the combined site of several reviews is built (.review/site/).
+ * Returns true when it created or extended the file.
+ */
+export function ignoreCombinedSite(parent: string): boolean {
+  const gi = join(parent, '.gitignore');
+  if (exists(gi)) {
+    const text = fs.readFileSync(gi, 'utf-8');
+    if (text.split(/\r?\n/).some((l) => ['site', 'site/', '/site', '/site/'].includes(l.trim()))) return false;
+    fs.appendFileSync(gi, (text && !text.endsWith('\n') ? '\n' : '') + '# review-kit combined site\n/site/\n');
+    return true;
+  }
+  if (!isdir(parent)) return false;
+  fs.writeFileSync(gi, '# review-kit build output: the combined site of the reviews in this folder\n/site/\n');
+  return true;
+}
+
 // ---------------------------------------------------------------- helpers
 export function slug(s: string): string {
   return pySlice(strip(s.toLowerCase().replace(/[^a-z0-9]+/g, '-'), '-'), 0, 40) || 'item';

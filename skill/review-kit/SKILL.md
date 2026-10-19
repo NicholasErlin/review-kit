@@ -100,13 +100,14 @@ This applies whenever several workers fix things at once: sub-agents, parallel s
 
 ## 6. Build, serve and report
 
-- Build: `rk build ui` (or `backend`), which writes `.review/ui/site/index.html`. The page also works when opened directly from disk.
-- Serve, detached so it keeps running after your command returns:
-  `nohup review-kit serve .review/ui/review.json --port 8787 --watch > /tmp/review-kit.log 2>&1 & disown`
+- Build: `rk build`. When the repo has both `.review/ui/` and `.review/backend/`, this writes ONE combined site at `.review/site/index.html` with a UI/UX / Backend switch and an overview of both; with one review it writes `.review/<kind>/site/`. `rk build ui` (or `backend`) builds only that review. The page also works when opened directly from disk.
+- Serve, detached so it keeps running after your command returns (with both kinds it serves the combined site, and `--watch` follows both reviews):
+  `nohup review-kit serve --port 8787 --watch > /tmp/review-kit.log 2>&1 & disown`
   - Then read the log and give the user the localhost URL. For a phone preview, explicitly add `--host 0.0.0.0` and give the LAN or Tailscale URL; tell the user anyone who can reach that port can read the review.
-  - Choose another port if 8787 is taken, and serve a second review on its own port (8788). Never kill servers you did not start.
+  - Choose another port if 8787 is taken. Never kill servers you did not start.
+  - Deep links include the review: `http://127.0.0.1:8787/#/backend/issues/issue-3`, `#/ui/fixes/fix-2`.
   - `--watch` rebuilds automatically after later `add-*` and `mark` calls.
-- Tidy up when a round is done: `rk clean` removes `site/` and merged `pending/*.applied.json`. `rk clean --orphans --dry-run` lists screenshots nothing references anymore; drop `--dry-run` to delete them. Screenshots that unmerged `pending/*.json` files reference are kept, and `--orphans` stops without deleting anything if a pending file can't be read.
+- Tidy up when a round is done: `rk clean` removes the built sites (each review's `site/` and the combined `.review/site/`) and merged `pending/*.applied.json`. `rk clean --orphans --dry-run` lists screenshots nothing references anymore; drop `--dry-run` to delete them. Screenshots that unmerged `pending/*.json` files reference are kept, and `--orphans` stops without deleting anything if a pending file can't be read.
 - Report: `rk summary` prints Markdown with totals, counts by severity and platform, the latest fixes, and the most severe open items. Use it for progress updates and PR descriptions, and end with the site URL.
 
 ## Reference

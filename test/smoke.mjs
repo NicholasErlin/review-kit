@@ -4,9 +4,12 @@
 //
 // Builds the review (default examples/demo/review.json), serves it on a free port, and checks at
 // 412x915 and 1440x900: tabs, compare slider / tap / side-by-side, lightbox, issue filters, issue
-// deep links, plan, no horizontal overflow and no console errors. Screenshots go to test/.smoke/.
+// deep links, plan, no horizontal overflow and no console errors. Then it builds a combined site (the demo as a
+// UI/UX review plus a re-themed copy as a Backend review in one .review/) and checks the review switch, per-review
+// routes and deep links, separate filters, keyboard use and 44px targets. Screenshots go to test/.smoke/.
 import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadPlaywright } from './pw.mjs';
@@ -17,14 +20,33 @@ const SHOTS = path.join(ROOT, 'test/.smoke');
 const CLI = path.join(ROOT, 'dist/cli.js');
 fs.mkdirSync(SHOTS, { recursive: true });
 
+const servers = [];
+/** `review-kit serve ARGS --no-build` on a free port; resolves with its base URL. */
+function serveSite(args, cwd = ROOT) {
+  const server = spawn(process.execPath, [CLI, 'serve', ...args, '--no-build', '--port', '0', '--host', '127.0.0.1'], { cwd, stdio: ['ignore', 'pipe', 'inherit'] });
+  servers.push(server);
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    server.stdout.on('data', (d) => { buf += d; const m = buf.match(/local:\s+(http:\/\/\S+)/); if (m) resolve(m[1]); });
+    server.on('exit', (c) => reject(new Error('server exited ' + c)));
+    setTimeout(() => reject(new Error('server did not start')), 10000);
+  });
+}
 execFileSync(process.execPath, [CLI, 'build', REVIEW], { stdio: 'inherit' });
-const server = spawn(process.execPath, [CLI, 'serve', REVIEW, '--no-build', '--port', '0', '--host', '127.0.0.1'], { stdio: ['ignore', 'pipe', 'inherit'] });
-const base = await new Promise((resolve, reject) => {
-  let buf = '';
-  server.stdout.on('data', (d) => { buf += d; const m = buf.match(/local:\s+(http:\/\/\S+)/); if (m) resolve(m[1]); });
-  server.on('exit', (c) => reject(new Error('server exited ' + c)));
-  setTimeout(() => reject(new Error('server did not start')), 10000);
-});
+const base = await serveSite([REVIEW]);
+
+// combined site: .review/ui (the demo) + .review/backend (the demo again, as a backend review with its own accent)
+const COMBO = fs.mkdtempSync(path.join(os.tmpdir(), 'rk-smoke-'));
+const DEMO = path.join(ROOT, 'examples/demo');
+for (const [kind, title, accent] of [['ui', 'UI/UX review', '#5b3df5'], ['backend', 'Backend review', '#7a3b00']]) {
+  const dir = path.join(COMBO, '.review', kind);
+  fs.cpSync(DEMO, dir, { recursive: true, filter: (src) => path.basename(src) !== 'site' });
+  const data = JSON.parse(fs.readFileSync(path.join(dir, 'review.json'), 'utf-8'));
+  Object.assign(data.project, { kind, title, theme: { accent, logoText: 'AN' } });
+  fs.writeFileSync(path.join(dir, 'review.json'), JSON.stringify(data, null, 2));
+}
+execFileSync(process.execPath, [CLI, 'build'], { cwd: COMBO, stdio: 'inherit' });
+const comboBase = await serveSite([], COMBO);
 
 const { chromium } = loadPlaywright();
 const browser = await chromium.launch();
@@ -173,6 +195,99 @@ async function run(name, viewport) {
   await ctx.close();
 }
 
+async function combined(name, viewport) {
+  console.log(`combined ${name} ${viewport.width}x${viewport.height}`);
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: name === 'mobile' ? 2 : 1, hasTouch: name === 'mobile' });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const shot = (n) => page.screenshot({ path: path.join(SHOTS, `combined-${name}-${n}.png`) });
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  const tabSel = name === 'mobile' ? '#tabs-bottom a' : '#tabs-top a';
+  const sw = page.locator('#review-switch a');
+  const current = () => page.locator('#review-switch a[aria-current]').innerText();
+  const headerBg = () => page.evaluate(() => getComputedStyle(document.querySelector('.top')).backgroundColor);
+  const count = () => page.locator('.issue').count();
+
+  // landing: both reviews side by side
+  await page.goto(comboBase);
+  await page.waitForSelector('#review-switch');
+  check((await sw.allInnerTexts()).join('|') === 'All|UI/UX|Backend', 'switch lists All, UI/UX, Backend in order');
+  check((await current()) === 'All', 'landing marks All as current');
+  check((await page.locator('#app .card').count()) === 2, 'landing shows one card per review');
+  check((await page.title()) === 'Acme Notes reviews', `landing title (got ${await page.title()})`);
+  check((await page.locator(tabSel).count()) === 0, 'landing has no per-review tabs');
+  const heights = await sw.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+  check(heights.every((h) => h >= (name === 'mobile' ? 44 : 36)), `switch targets are large enough (${heights.join(', ')})`);
+  check(await overflow() <= 0, 'landing has no horizontal overflow');
+  await shot('landing');
+
+  // switch to Backend: its own theme, title and tabs
+  const uiBg = await (async () => { await sw.filter({ hasText: 'UI/UX' }).click(); await page.waitForSelector('.view-title'); return headerBg(); })();
+  check(page.url().endsWith('#/ui/overview'), 'UI/UX link opens #/ui/overview');
+  await sw.filter({ hasText: 'Backend' }).click();
+  await page.waitForTimeout(100);
+  check(page.url().endsWith('#/backend/overview'), `Backend link opens #/backend/overview (got ${page.url()})`);
+  check((await current()) === 'Backend', 'Backend marked current');
+  check((await page.locator('#brand').innerText()).includes('Backend review'), 'header shows the backend title');
+  check((await headerBg()) !== uiBg, 'header takes the backend accent');
+  check((await page.title()) === 'Acme Notes Backend review', 'document title follows the review');
+  check((await page.locator(tabSel).count()) === 4, 'backend has its four tabs');
+  await shot('backend-overview');
+
+  // tabs stay inside the review, and switching keeps the view
+  await page.locator(tabSel, { hasText: 'Issues' }).click();
+  await page.waitForTimeout(100);
+  check(page.url().endsWith('#/backend/issues'), 'Issues tab routes to #/backend/issues');
+  await page.locator('#freset').click();
+  if (name === 'mobile') await page.locator('#ftoggle').click();
+  await page.locator('.chip[data-f=sev][data-v=P1]').click();
+  check((await count()) === 3, 'backend P1 filter -> 3');
+  await sw.filter({ hasText: 'UI/UX' }).click();
+  await page.waitForTimeout(100);
+  check(page.url().endsWith('#/ui/issues'), 'switching keeps the Issues view');
+  check((await count()) === 8, 'UI/UX filters are separate from Backend filters');
+  check((await page.locator('#fcount').innerText()) === '', 'no filter badge on UI/UX');
+  check(await overflow() <= 0, 'combined issues have no horizontal overflow');
+  await page.goto(comboBase + '#/backend/issues');
+  await page.waitForSelector('.issue');
+  check((await count()) === 3, 'backend filter remembered');
+  await page.locator('#freset').click();
+
+  // deep links into the second review, and links between its views
+  await page.goto(comboBase + '#/backend/issues/d-1');
+  await page.waitForSelector('.issue.open');
+  check((await count()) === 1, 'backend deep link shows one issue');
+  check((await current()) === 'Backend', 'deep link selects Backend');
+  await page.locator('.issue.open .fixedby .ichip').click();
+  await page.waitForSelector('#fix-fix-2');
+  check(page.url().includes('#/backend/fixes/fix-2'), 'fix chip stays in the backend review');
+  await shot('backend-fixes');
+  // an old single-review hash still opens something sensible
+  await page.goto(comboBase + '#/plan');
+  await page.waitForSelector('.view-title');
+  check((await page.locator('.view-title').innerText()).startsWith('Plan'), 'single-review hash #/plan still renders');
+
+  // keyboard: Tab to the switch and press Enter
+  await page.goto(comboBase + '#/ui/overview');
+  await page.waitForSelector('.view-title');
+  await page.locator('#review-switch a', { hasText: 'Backend' }).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  check(page.url().endsWith('#/backend/overview'), 'Enter on a focused switch link switches review');
+  await page.locator('.brand').click();
+  await page.waitForTimeout(100);
+  check((await current()) === 'All', 'brand link returns to the combined overview');
+  await page.goto(comboBase + '#/ui/fixes');
+  await page.waitForSelector('.fixcard');
+  check(await overflow() <= 0, 'combined fixes have no horizontal overflow');
+  await shot('ui-fixes');
+
+  check(errors.length === 0, 'combined: no console errors: ' + errors.join(' | '));
+  await ctx.close();
+}
+
 async function dark() {
   console.log('dark mode 412x915');
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, colorScheme: 'dark' });
@@ -192,9 +307,12 @@ try {
   await run('mobile', { width: 412, height: 915 });
   await run('desktop', { width: 1440, height: 900 });
   await dark();
+  await combined('mobile', { width: 412, height: 915 });
+  await combined('desktop', { width: 1440, height: 900 });
 } finally {
   await browser.close();
-  server.kill();
+  for (const s of servers) s.kill();
+  fs.rmSync(COMBO, { recursive: true, force: true });
 }
 console.log(`${passes} checks passed, ${failures} failed. Screenshots: ${SHOTS}`);
 process.exit(failures ? 1 : 0);

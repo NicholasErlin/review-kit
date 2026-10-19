@@ -6,8 +6,12 @@ const KINDS = ['ui', 'backend'];
 const ISSUE_STATUSES = ['open', 'partial', 'fixed', 'notabug', 'wontfix'];
 const PLAN_STATUSES = ['todo', 'doing', 'partial', 'done', 'dropped'];
 
-function reviewArg(p: ArgumentParser): void {
-  p.addArgument(['review'], {
+function reviewArg(p: ArgumentParser, several = false): void {
+  p.addArgument(['review'], several ? {
+    nargs: '*',
+    help: 'review.json, its folder or a kind (ui, backend); several, or a parent folder such as .review, give one '
+      + 'combined site (default: auto-discover, combining every .review/<kind>/ when there are several)',
+  } : {
     nargs: '?',
     help: 'path to review.json or its folder, or a kind (ui, backend) for .review/<kind>/ (default: auto-discover)',
   });
@@ -64,9 +68,11 @@ export function parser(): ArgumentParser {
   reviewArg(s);
   s.addArgument(['--no-files'], { action: 'store_true', help: 'skip checking that images exist' });
 
-  s = sub.addParser('build', { help: 'validate and write the static site' });
-  reviewArg(s);
-  s.addArgument(['--out'], { help: 'output folder (default: site/ next to review.json)' });
+  s = sub.addParser('build', { help: 'validate and write the static site (one combined site for several reviews)' });
+  reviewArg(s, true);
+  s.addArgument(['--out'], {
+    help: 'output folder (default: site/ next to review.json; for several reviews, site/ in their parent, e.g. .review/site)',
+  });
   s.addArgument(['--max-width'], {
     type: 'int',
     help: 'downscale wider PNG/JPEG images (needs sips or ImageMagick; copied as-is otherwise)',
@@ -77,15 +83,19 @@ export function parser(): ArgumentParser {
   s = sub.addParser('serve', {
     help: 'build (unless --no-build) and serve locally; --host 0.0.0.0 enables network sharing',
   });
-  s.addArgument(['target'], { nargs: '?', help: 'review.json, its folder, or a built site folder' });
+  s.addArgument(['target'], {
+    nargs: '*',
+    help: 'review.json, its folder, a kind, several of these (or a parent such as .review) for one combined site, '
+      + 'or a built site folder (default: auto-discover)',
+  });
   s.addArgument(['-r'], { dest: 'review_opt', help: SUPPRESS });
   s.addArgument(['--port'], { type: 'int', default: 8787, help: 'default 8787 (0 = pick a free port)' });
   s.addArgument(['--host'], {
     default: '127.0.0.1',
     help: 'default 127.0.0.1 (local only); use 0.0.0.0 to share on your network',
   });
-  s.addArgument(['--out'], { help: 'site folder (default: site/ next to review.json)' });
-  s.addArgument(['--watch'], { action: 'store_true', help: 'rebuild when review.json or screenshots/ change' });
+  s.addArgument(['--out'], { help: 'site folder (default: site/ next to review.json, or .review/site for several)' });
+  s.addArgument(['--watch'], { action: 'store_true', help: 'rebuild when a review.json or its screenshots/ change' });
   s.addArgument(['--no-build'], { action: 'store_true' });
   s.addArgument(['--max-width'], { type: 'int' });
   s.addArgument(['--force'], { action: 'store_true' });
@@ -163,9 +173,9 @@ export function parser(): ArgumentParser {
   s = sub.addParser('clean', {
     help: 'remove the built site, merged pending/*.applied.json and (--orphans) unused screenshots',
   });
-  reviewArg(s);
+  reviewArg(s, true);
   s.addArgument(['--out'], {
-    help: 'site folder (default: site/ next to review.json); only removed if review-kit built it',
+    help: 'site folder (default: site/ next to review.json, plus .review/site for several); only removed if review-kit built it',
   });
   s.addArgument(['--orphans'], {
     action: 'store_true',

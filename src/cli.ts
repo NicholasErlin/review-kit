@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ArgparseExit, type Namespace } from './argparse.js';
 import * as attach from './attach.js';
-import { build } from './build.js';
+import { buildAny } from './build.js';
 import * as clean from './clean.js';
 import { parser } from './cliparser.js';
 import * as companions from './companions.js';
@@ -16,7 +16,7 @@ import * as model from './model.js';
 import { dumps, JSONDecodeError, loads } from './pyjson.js';
 import {
   abspath, basename, copyDict, decodeUtf8, dirname, exists, get, has, isabs, isdir, isDict, isfile, isOSError, join,
-  osErrorMessage, reprStr, setKey, sorted, strip, truthy, UnicodeDecodeError,
+  osErrorMessage, relpath, reprStr, setKey, sorted, strip, truthy, UnicodeDecodeError,
 } from './py.js';
 import * as serveMod from './serve.js';
 import { setup } from './setup.js';
@@ -27,22 +27,60 @@ import * as validate from './validate.js';
 export const CANDIDATES = ['review.json', '.review/review.json', 'docs/review/review.json', 'review/review.json'];
 export const KIND_PARENTS = ['.review', 'docs/review'];
 
+/** .review/<kind>/review.json (and docs/review/<kind>/) under `parent`, or under the cwd's kind parents. */
+function kindReviews(parent?: string): string[] {
+  const parents = parent ? [parent] : KIND_PARENTS;
+  return sorted(parents.flatMap((p) => companions.glob(join(p, '*', 'review.json'))));
+}
+
 export function findReview(path?: string | null): string {
-  if (path) {
-    if (!exists(path) && has(attach.KIND_DEFAULTS, path)) {
-      for (const parent of KIND_PARENTS) {
-        if (isfile(join(parent, path, 'review.json'))) return join(parent, path, 'review.json');
-      }
-    }
-    if (isdir(path)) path = join(path, 'review.json');
-    return path;
-  }
-  for (const c of CANDIDATES) if (isfile(c)) return c;
-  const found = sorted([...companions.glob(join('.review', '*', 'review.json')), ...companions.glob(join('docs', 'review', '*', 'review.json'))]);
+  const found = findReviews(path ? [path] : []);
   if (found.length === 1) return found[0];
-  if (found.length) throw new ReviewError('several reviews here (' + found.join(', ') + '); pass one, e.g. `review-kit build ui`');
+  throw new ReviewError('several reviews here (' + found.join(', ') + '); pass one, e.g. `review-kit build ui`');
+}
+
+function resolveOne(path: string): string[] {
+  if (!exists(path) && has(attach.KIND_DEFAULTS, path)) {
+    for (const parent of KIND_PARENTS) {
+      if (isfile(join(parent, path, 'review.json'))) return [join(parent, path, 'review.json')];
+    }
+  }
+  if (isdir(path)) {
+    // A parent folder such as .review/ that holds one review per kind stands for all of them.
+    if (!exists(join(path, 'review.json'))) {
+      const kids = kindReviews(path);
+      if (kids.length) return kids;
+    }
+    return [join(path, 'review.json')];
+  }
+  return [path];
+}
+
+/**
+ * The reviews a command acts on. With no paths: the first CANDIDATES file, else every .review/<kind>/review.json
+ * (and docs/review/<kind>/). A kind, a review.json, its folder, or a parent folder holding several kinds can be given.
+ */
+export function findReviews(paths: (string | null | undefined)[] = []): string[] {
+  const given = paths.filter((p): p is string => !!p);
+  if (given.length) {
+    const out: string[] = [];
+    for (const p of given) for (const r of resolveOne(p)) if (!out.includes(r)) out.push(r);
+    return out;
+  }
+  for (const c of CANDIDATES) if (isfile(c)) return [c];
+  const found = kindReviews();
+  if (found.length) return found;
   throw new ReviewError('no review.json found here (looked for ' + CANDIDATES.join(', ')
     + ', .review/<kind>/review.json); pass a path or run `review-kit init`');
+}
+
+/** Where a combined site goes by default: site/ in the folder the reviews share (.review/site). */
+export function combinedOut(paths: string[]): string {
+  const parents = [...new Set(paths.map((p) => dirname(abspath(model.baseDir(p)))))];
+  if (parents.length !== 1) {
+    throw new ReviewError('these reviews do not share a parent folder; pass --out DIR for the combined site');
+  }
+  return relpath(join(parents[0], 'site'));
 }
 
 function readStdin(): string {
@@ -133,21 +171,43 @@ function cmdValidate(a: Namespace): number {
 
 const defaultOut = (path: string) => join(model.baseDir(path), 'site');
 
+/** The review arguments of build / serve / clean (positional, plus the hidden -r). */
+function reviewArgs(a: Namespace, key = 'review'): string[] {
+  const v = a[key];
+  const list: string[] = Array.isArray(v) ? v : v ? [v] : [];
+  return a.review_opt ? [...list, a.review_opt] : list;
+}
+
+function siteOut(a: Namespace, paths: string[]): string {
+  return a.out || (paths.length === 1 ? defaultOut(paths[0]) : combinedOut(paths));
+}
+
+/** A combined site built to its default folder (.review/site) is kept out of git like each review's own site/. */
+function ignoreSite(a: Namespace, paths: string[], out: string): void {
+  if (paths.length > 1 && !a.out && edit.ignoreCombinedSite(dirname(out))) {
+    print(`note: added site/ to ${join(dirname(out), '.gitignore')}`);
+  }
+}
+
 function cmdBuild(a: Namespace): void {
-  const path = findReview(a.review || a.review_opt);
-  build(path, a.out || defaultOut(path), { maxWidth: a.max_width, force: a.force, clean: a.clean });
+  const paths = findReviews(reviewArgs(a));
+  const out = siteOut(a, paths);
+  ignoreSite(a, paths, out);
+  buildAny(paths, out, { maxWidth: a.max_width, force: a.force, clean: a.clean });
 }
 
 async function cmdServe(a: Namespace): Promise<number> {
-  const target = a.target || a.review_opt;
+  const targets = reviewArgs(a, 'target');
+  const target = targets.length === 1 ? targets[0] : null;
   let server;
   if (target && isdir(target) && isfile(join(target, 'index.html')) && !isfile(join(target, 'review.json'))) {
     server = await serveMod.serve(target, a.host, a.port);
   } else {
-    const path = findReview(target);
-    const out = a.out || defaultOut(path);
-    if (!a.no_build) build(path, out, { maxWidth: a.max_width, force: a.force });
-    server = await serveMod.serve(out, a.host, a.port, { reviewPath: path, watch: a.watch, maxWidth: a.max_width });
+    const paths = findReviews(targets);
+    const out = siteOut(a, paths);
+    if (!a.no_build) ignoreSite(a, paths, out);
+    if (!a.no_build) buildAny(paths, out, { maxWidth: a.max_width, force: a.force });
+    server = await serveMod.serve(out, a.host, a.port, { reviewPath: paths, watch: a.watch, maxWidth: a.max_width });
   }
   await new Promise<void>((resolve) => {
     process.once('SIGINT', () => {
@@ -282,10 +342,24 @@ function cmdSummary(a: Namespace): void {
 }
 
 function cmdClean(a: Namespace): void {
-  const path = findReview(a.review || a.review_opt);
-  const [removed, skipped] = clean.clean(path, {
-    out: a.out, site: !a.keep_site, applied: !a.keep_applied, orphaned: a.orphans, dryRun: a.dry_run,
-  });
+  const paths = findReviews(reviewArgs(a));
+  const opts = { site: !a.keep_site, applied: !a.keep_applied, orphaned: a.orphans, dryRun: a.dry_run };
+  let removed: string[] = [];
+  let skipped: string[] = [];
+  if (paths.length === 1) [removed, skipped] = clean.clean(paths[0], { ...opts, out: a.out });
+  else {
+    // Several reviews: the combined site (or --out), plus each review's own site/ unless --out names the folder.
+    for (const p of paths) {
+      const [r, s] = clean.clean(p, { ...opts, site: opts.site && !a.out });
+      removed.push(...r);
+      skipped.push(...s);
+    }
+    if (opts.site) {
+      const [r, s] = clean.cleanSite(abspath(siteOut(a, paths)), opts.dryRun);
+      removed.push(...r);
+      skipped.push(...s);
+    }
+  }
   for (const line of skipped) print('skipped:', line);
   const verb = a.dry_run ? 'would remove' : 'removed';
   for (const line of removed) print(`${verb}: ${line}`);
