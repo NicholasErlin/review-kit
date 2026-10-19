@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NicholasErlin/review-kit/schema/review.schema.json",
+  "title": "review-kit review.json (format version 1)",
+  "description": "Issues found, fixes shipped (with before/after screenshots) and the remaining plan for one project. Rich-text fields are sanitized Markdown or HTML. Asset paths must resolve inside the directory containing review.json.",
+  "type": "object",
+  "required": ["version", "project"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1, "description": "Format version. Bumped only on breaking changes." },
+    "project": { "$ref": "#/$defs/project" },
+    "platforms": {
+      "type": "array",
+      "description": "Variants the review covers (e.g. mobile, desktop). May be a single entry. Defaults to one platform with id \"default\".",
+      "items": { "$ref": "#/$defs/platform" }
+    },
+    "severities": {
+      "type": "array",
+      "description": "Ordered most to least severe. Defaults to P0, P1, P2.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/severity" }
+    },
+    "areas": {
+      "type": "array",
+      "description": "Pages, screens or report sections. Issues refer to them by id.",
+      "items": { "$ref": "#/$defs/area" }
+    },
+    "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+    "fixes": { "type": "array", "items": { "$ref": "#/$defs/fix" } },
+    "plan": {
+      "type": "array",
+      "description": "Roadmap groups, each with items that carry a status.",
+      "items": { "$ref": "#/$defs/planGroup" }
+    },
+    "appendix": {
+      "type": "array",
+      "description": "Free-form extra sections shown under the plan (measurements, methodology, ...).",
+      "items": { "$ref": "#/$defs/appendixEntry" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "maxLength": 120 },
+    "rich": { "type": "string", "description": "Sanitized Markdown subset (or sanitized HTML when project.textFormat is html)." },
+    "color": { "type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$" },
+    "link": {
+      "type": "object",
+      "required": ["label", "href"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "href": { "type": "string", "minLength": 1, "description": "URL, or a path relative to review.json (copied into the site when it exists)." },
+        "kind": { "type": "string", "description": "Optional hint: pdf, report, pr, doc, ..." }
+      }
+    },
+    "image": {
+      "description": "A screenshot: either a relative path, or an object with a caption.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["src"],
+          "additionalProperties": false,
+          "properties": {
+            "src": { "type": "string", "minLength": 1 },
+            "caption": { "$ref": "#/$defs/rich" },
+            "alt": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "project": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "description": "Shown after the name in the header, e.g. \"UI/UX audit\". Default \"Review\"." },
+        "description": { "$ref": "#/$defs/rich" },
+        "date": { "type": "string", "description": "Review date, ISO 8601 preferred." },
+        "repo": { "type": "string", "description": "Repository URL or path." },
+        "textFormat": { "enum": ["markdown", "html"], "default": "markdown" },
+        "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accent": { "$ref": "#/$defs/color" },
+            "accentDark": { "$ref": "#/$defs/color" },
+            "logoText": { "type": "string", "maxLength": 3, "description": "Up to 3 characters in the header badge. Default: first letter of name." }
+          }
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "shape": { "enum": ["portrait", "landscape", "auto"], "default": "auto", "description": "Screenshot orientation; auto detects from image sizes." },
+        "description": { "type": "string" }
+      }
+    },
+    "severity": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "color": { "$ref": "#/$defs/color" },
+        "description": { "type": "string" }
+      }
+    },
+    "area": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "num": { "type": "string", "description": "Optional display number, e.g. \"3\"." },
+        "platform": { "type": "string" },
+        "description": { "$ref": "#/$defs/rich" },
+        "screenshots": { "type": "array", "items": { "$ref": "#/$defs/image" } }
+      }
+    },
+    "issueStatus": { "enum": ["open", "partial", "fixed", "notabug", "wontfix"] },
+    "issue": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "platform": { "type": "string", "description": "Platform id. Omit when the project has a single platform." },
+        "area": { "type": "string", "description": "Area id, or free text when no matching area exists." },
+        "severity": { "type": ["string", "null"], "description": "Severity id, or null for unranked items (e.g. root causes)." },
+        "status": { "$ref": "#/$defs/issueStatus", "default": "open" },
+        "title": { "type": "string", "minLength": 1, "description": "Plain text one-liner." },
+        "details": { "$ref": "#/$defs/rich" },
+        "note": { "$ref": "#/$defs/rich", "description": "Resolution note, e.g. what the fix did." },
+        "where": { "$ref": "#/$defs/rich", "description": "Location in code, e.g. file:line." },
+        "date": { "type": "string" },
+        "top": { "type": "boolean", "description": "List in the Overview's top issues." },
+        "rank": { "type": "integer", "description": "Order within the top issues (ascending)." },
+        "counted": { "type": "boolean", "default": true, "description": "false = summary row restating other issues: shown in top issues, excluded from totals." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Free tags; \"root-cause\" is shown as a badge." },
+        "screenshots": { "type": "array", "items": { "$ref": "#/$defs/image" } }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["before"] }, { "required": ["after"] }],
+      "properties": {
+        "before": { "$ref": "#/$defs/image" },
+        "after": { "$ref": "#/$defs/image" },
+        "caption": { "$ref": "#/$defs/rich", "description": "Shared caption for the pair." }
+      }
+    },
+    "fixPlatform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/$defs/rich" },
+        "pairs": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+        "images": { "type": "array", "items": { "$ref": "#/$defs/image" }, "description": "Extra screenshots that are not before/after." }
+      }
+    },
+    "fix": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "number": { "type": "integer", "minimum": 0 },
+        "title": { "type": "string", "minLength": 1 },
+        "date": { "type": "string" },
+        "summary": { "$ref": "#/$defs/rich", "description": "What changed and why." },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sha"],
+            "additionalProperties": false,
+            "properties": {
+              "sha": { "type": "string", "minLength": 4 },
+              "url": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        },
+        "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+        "issues": { "type": "array", "items": { "type": "string" }, "description": "Issue ids this fix addresses." },
+        "platforms": {
+          "type": "object",
+          "description": "Keyed by platform id.",
+          "additionalProperties": { "$ref": "#/$defs/fixPlatform" }
+        }
+      }
+    },
+    "planStatus": { "enum": ["todo", "doing", "partial", "done", "dropped"] },
+    "planItem": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "phase": { "type": "string" },
+        "severity": { "type": ["string", "null"] },
+        "title": { "$ref": "#/$defs/rich", "description": "The change, inline rich text." },
+        "details": { "$ref": "#/$defs/rich" },
+        "files": { "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+        "effort": { "type": "string" },
+        "status": { "$ref": "#/$defs/planStatus", "default": "todo" },
+        "note": { "$ref": "#/$defs/rich" },
+        "issues": { "type": "array", "items": { "type": "string" } },
+        "fixes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "planGroup": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string" },
+        "intro": { "$ref": "#/$defs/rich" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/planItem" } }
+      }
+    },
+    "appendixEntry": {
+      "type": "object",
+      "required": ["title", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string" },
+        "body": { "$ref": "#/$defs/rich" }
+      }
+    }
+  }
+}

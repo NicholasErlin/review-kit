@@ -1,0 +1,9 @@
+--- a/style.css
++++ b/style.css
+@@ -16,5 +16,5 @@
+ .task:first-child { border-top: 0; }
+ .task label { display: flex; align-items: center; gap: 10px; }
+ .task input { width: 18px; height: 18px; }
+-.task.done span { color: #d5dbdd; text-decoration: line-through; }
++.task.done span { color: #6b7a80; text-decoration: line-through; }
+ .remove { padding: 0 6px; font-size: 20px; color: #9aa6aa; background: none; border: 0; }

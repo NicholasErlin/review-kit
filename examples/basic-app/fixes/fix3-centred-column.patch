@@ -1,0 +1,11 @@
+--- a/style.css
++++ b/style.css
+@@ -5,7 +5,7 @@
+ .bar h1 { margin: 0; font-size: 20px; }
+ .count { font-size: 14px; opacity: .85; }
+ 
+-.page { padding: 20px; }
++.page { max-width: 680px; margin: 0 auto; padding: 20px; }
+ 
+ .add { display: flex; gap: 10px; max-width: 560px; margin-bottom: 18px; }
+ .add-input { flex: 1 1 auto; min-width: 0; padding: 12px 14px; font: inherit; border: 1px solid #c9d3d6; border-radius: 8px; }

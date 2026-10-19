@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build output (regenerate with `review-kit build`). reviewkit/site/ is the template and IS tracked.
+/site/
+/examples/*/site/
+.cache/
+
+# Smoke test artefacts
+tests/.smoke/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local secrets and authenticated browser sessions
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+credentials.json
+credentials
+secrets.json
+state.json
+storage-state.json
+storageState.json
+auth.json
+cookies.json
+.auth/
+playwright/.auth/
+.ssh/
+.aws/

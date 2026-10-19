@@ -1,0 +1,146 @@
+{
+  "$schema": "../../schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "Acme Notes",
+    "title": "UX review",
+    "description": "A small, synthetic example: a phone and desktop pass over a notes app. Two fixes have shipped; the rest is tracked below.",
+    "date": "2026-10-18",
+    "repo": "https://example.com/acme/notes",
+    "links": [
+      { "label": "Raw notes", "href": "notes.md", "kind": "doc" },
+      { "label": "Design system", "href": "https://example.com/design" }
+    ],
+    "theme": { "accent": "#5b3df5", "logoText": "AN" }
+  },
+  "platforms": [
+    { "id": "mobile", "label": "Mobile", "shape": "portrait", "description": "Pixel 7, 412x915" },
+    { "id": "desktop", "label": "Desktop", "description": "1440x900" }
+  ],
+  "severities": [
+    { "id": "P0", "label": "P0", "color": "#c62828", "description": "Blocker" },
+    { "id": "P1", "label": "P1", "color": "#e07b00", "description": "Major" },
+    { "id": "P2", "label": "P2", "color": "#2f7d5b", "description": "Polish" }
+  ],
+  "areas": [
+    { "id": "m-editor", "num": "1", "title": "Note editor", "platform": "mobile", "screenshots": [
+      { "src": "screenshots/mobile-save-before.png", "caption": "Editor on a phone, scrolled to the bottom." }
+    ] },
+    { "id": "m-list", "num": "2", "title": "Notes list", "platform": "mobile" },
+    { "id": "d-list", "num": "1", "title": "Notes table", "platform": "desktop", "screenshots": [
+      { "src": "screenshots/desktop-table-before.png", "caption": "The notes table at 1440 px." }
+    ] },
+    { "id": "d-settings", "num": "2", "title": "Settings", "platform": "desktop" }
+  ],
+  "issues": [
+    {
+      "id": "m-1", "platform": "mobile", "area": "m-editor", "severity": "P0", "status": "fixed",
+      "title": "Save is hidden behind the bottom navigation",
+      "details": "On phones the **Save** button sits under the bottom nav, so edits are lost when people leave the page.\n\n- Reproduce: open any note, scroll to the end\n- Expected: Save is always visible",
+      "note": "Fixed in #1: the form footer is sticky above the nav.",
+      "where": "`src/editor/NoteForm.tsx:88`",
+      "top": true, "rank": 1
+    },
+    {
+      "id": "m-2", "platform": "mobile", "area": "m-editor", "severity": "P1", "status": "partial",
+      "title": "Primary button is low contrast",
+      "details": "The pale primary button fails WCAG AA (2.1:1).",
+      "note": "The editor uses the solid primary now; the share sheet still uses the pale variant.",
+      "top": true, "rank": 2
+    },
+    {
+      "id": "m-3", "platform": "mobile", "area": "m-list", "severity": "P2", "status": "open",
+      "title": "List rows truncate titles after 12 characters"
+    },
+    {
+      "id": "m-4", "platform": "mobile", "area": "m-list", "severity": null, "status": "open",
+      "title": "Root cause: one layout component is reused for phone and desktop",
+      "details": "Several phone issues trace back to the shared `PageLayout` that hides content with CSS instead of rendering one tree.",
+      "tags": ["root-cause"]
+    },
+    {
+      "id": "d-1", "platform": "desktop", "area": "d-list", "severity": "P1", "status": "fixed",
+      "title": "Date and title columns overlap in the notes table",
+      "details": "Long dates run into the title column at 1440 px.",
+      "note": "Fixed in #2: explicit column widths and a row actions column.",
+      "screenshots": ["screenshots/desktop-table-before.png"],
+      "top": true, "rank": 1
+    },
+    {
+      "id": "d-2", "platform": "desktop", "area": "d-settings", "severity": "P2", "status": "notabug",
+      "title": "Export button does nothing",
+      "note": "Checked: the export runs in the background and emails the file, as designed."
+    },
+    {
+      "id": "d-3", "platform": "desktop", "area": "d-settings", "severity": "P2", "status": "wontfix",
+      "title": "Settings page has no keyboard shortcut",
+      "note": "Out of scope for this release."
+    },
+    {
+      "id": "d-4", "platform": "desktop", "area": "d-list", "severity": "P1", "status": "open",
+      "title": "Bulk delete has no confirmation",
+      "details": "Selecting rows and pressing *Delete* removes them immediately, with no undo."
+    }
+  ],
+  "fixes": [
+    {
+      "id": "fix-1", "number": 1, "title": "Sticky Save bar on phone forms", "date": "2026-10-17",
+      "summary": "The form footer is now `position: sticky` above the bottom navigation, and uses the solid primary button.",
+      "files": ["src/editor/NoteForm.tsx", "src/ui/FormFooter.tsx"],
+      "commits": [{ "sha": "3f9c2ab71d", "message": "Sticky form footer" }],
+      "issues": ["m-1", "m-2"],
+      "platforms": {
+        "mobile": {
+          "description": "Pixel 7 portrait, editor scrolled to the bottom.",
+          "pairs": [
+            {
+              "before": { "src": "screenshots/mobile-save-before.png", "caption": "Save is pale and **under** the bottom nav." },
+              "after": { "src": "screenshots/mobile-save-after.png", "caption": "Cancel and Save sit in a sticky bar above the nav." }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fix-2", "number": 2, "title": "Notes table columns no longer overlap", "date": "2026-10-18",
+      "summary": "Columns get explicit widths and the dates wrap onto two lines. A row actions column was added.",
+      "files": ["src/notes/NotesTable.tsx"],
+      "links": [{ "label": "PR #42", "href": "https://example.com/acme/notes/pull/42" }],
+      "issues": ["d-1"],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": { "src": "screenshots/desktop-table-before.png", "caption": "Dates (red) run into the title column." },
+              "after": { "src": "screenshots/desktop-table-after.png", "caption": "Fixed widths, row actions on the right." },
+              "caption": "1440x900, light mode."
+            }
+          ]
+        },
+        "mobile": {
+          "description": "Phones use the card list, which was not affected.",
+          "images": [{ "src": "screenshots/mobile-save-after.png", "caption": "Card list for reference." }]
+        }
+      }
+    }
+  ],
+  "plan": [
+    {
+      "id": "roadmap", "title": "Roadmap",
+      "intro": "Effort: S = under half a day, M = 1–2 days.",
+      "items": [
+        { "id": "p-footer", "phase": "Hotfix", "severity": "P0", "title": "Sticky form footer on phones", "files": ["src/ui/FormFooter.tsx"], "effort": "S", "status": "done", "fixes": ["fix-1"] },
+        { "id": "p-confirm", "phase": "Hotfix", "severity": "P1", "title": "Confirm or undo for bulk delete", "effort": "S", "status": "todo", "issues": ["d-4"] },
+        { "id": "p-contrast", "phase": "Foundation", "severity": "P1", "title": "One solid primary button style everywhere", "effort": "M", "status": "partial", "note": "Editor done; share sheet left." },
+        { "id": "p-layout", "phase": "Foundation", "title": "Render one layout tree per breakpoint", "effort": "M", "status": "doing", "issues": ["m-4"] },
+        { "id": "p-shortcuts", "phase": "Later", "title": "Keyboard shortcuts for settings", "effort": "S", "status": "dropped" }
+      ]
+    }
+  ],
+  "appendix": [
+    {
+      "title": "Method",
+      "body": "Every page was opened at **412x915** (portrait phone) and **1440x900**. Screenshots were taken with Playwright before and after each fix.\n\n<table><tr><th>Viewport</th><th>Pages</th><th>Issues</th></tr><tr><td>412x915</td><td>2</td><td>4</td></tr><tr><td>1440x900</td><td>2</td><td>4</td></tr></table>"
+    }
+  ]
+}

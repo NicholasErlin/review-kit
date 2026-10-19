@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pocket Tasks</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>Pocket Tasks</h1>
+    <span id="count" class="count"></span>
+  </header>
+  <main class="page">
+    <form id="add" class="add">
+      <input id="text" class="add-input" placeholder="What needs doing?" autocomplete="off">
+      <button class="add-button" type="submit">Add task</button>
+    </form>
+    <ul id="list" class="list"></ul>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+--- a/style.css
++++ b/style.css
+@@ -7,8 +7,8 @@
+ 
+ .page { padding: 20px; }
+ 
+-.add { display: flex; gap: 10px; width: 560px; margin-bottom: 18px; }
+-.add-input { flex: 0 0 400px; padding: 12px 14px; font: inherit; border: 1px solid #c9d3d6; border-radius: 8px; }
++.add { display: flex; gap: 10px; max-width: 560px; margin-bottom: 18px; }
++.add-input { flex: 1 1 auto; min-width: 0; padding: 12px 14px; font: inherit; border: 1px solid #c9d3d6; border-radius: 8px; }
+ .add-button { flex: 0 0 auto; padding: 12px 18px; font: inherit; font-weight: 600; color: #fff; background: #2f5d50; border: 0; border-radius: 8px; }
+ 
+ .list { list-style: none; margin: 0; padding: 0; background: #fff; border-radius: 10px; box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
