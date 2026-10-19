@@ -76,6 +76,7 @@ h1, h2, h3 { line-height: 1.25; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 14px 12px; }
 @media (min-width: 820px) { .wrap { padding: 22px 16px; } }
 .view-title { font-size: 22px; margin: 4px 2px 12px; color: var(--brand); }
+.view-title[tabindex="-1"]:focus { outline: none; } /* focus moves here on view change for screen readers; nothing to interact with */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); margin-bottom: 12px; min-width: 0; }
 .card h2 { font-size: 17px; margin: 0 0 10px; }
 .card h3 { font-size: 15px; margin: 14px 0 6px; }
