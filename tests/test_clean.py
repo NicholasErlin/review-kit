@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 
@@ -37,6 +38,27 @@ class CleanTest(TempDirTest):
         self.assertTrue(os.path.isdir(self.site))
         self.assertFalse(os.path.exists(os.path.dirname(self.orphan)))
         self.assertEqual(validate.validate(model.load(self.review), self.base)[0], [])
+
+    def test_orphans_keeps_screenshots_referenced_by_pending_hand_offs(self):
+        # regression: backend review issue-2
+        shot = self.png('demo/screenshots/fix7/before.png')
+        issue_shot = self.png('demo/screenshots/fix7/issue.png')
+        with open(os.path.join(self.pending, 'fix7.json'), 'w') as f:
+            json.dump({'fix': {'title': 'x', 'platforms': {'mobile': {'pairs': [{'before': 'screenshots/fix7/before.png'}]}}},
+                       'issues': [{'title': 'y', 'screenshots': [{'src': 'screenshots/fix7/issue.png'}]}]}, f)
+        self.assertEqual(clean.orphans(self.review), [os.path.normpath(self.orphan)])
+        run('clean', self.review, '--orphans')
+        self.assertTrue(os.path.exists(shot))
+        self.assertTrue(os.path.exists(issue_shot))
+        self.assertFalse(os.path.exists(self.orphan))
+
+    def test_orphans_refuses_when_a_pending_file_is_unreadable(self):
+        with open(os.path.join(self.pending, 'fix8.json'), 'w') as f:
+            f.write('{not json')
+        code, _, err = run('clean', self.review, '--orphans')
+        self.assertEqual(code, 1)
+        self.assertIn('fix8.json', err)
+        self.assertTrue(os.path.exists(self.orphan))
 
     def test_dry_run_touches_nothing(self):
         code, out, _ = run('clean', self.review, '--orphans', '--dry-run')

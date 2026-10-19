@@ -25,7 +25,7 @@ The authoritative definition is [`schema/review.schema.json`](../schema/review.s
 
 ### project
 
-`name` is required. The other fields are optional: `title` (shown after the name, default "Review"), `description` (rich), `date`, `repo` (a public HTTP(S) URL), and `links`. Each link is `[{label, href, kind?}]`. When `href` is a local file such as a PDF, it is copied into the site. `textFormat` is `markdown` or `html`. `theme` takes `{accent, accentDark, logoText}`. `accent` colours the header and the primary buttons. `accentDark` sets the link colour in dark mode and is derived automatically when it is omitted. `logoText` holds up to 3 characters for the badge.
+`name` is required. The other fields are optional: `title` (shown after the name, default "Review"), `kind` (`ui` or `backend`, default `ui`: what is reviewed, which tells agents which playbook to follow), `description` (rich), `date`, `repo` (a public HTTP(S) URL), and `links`. Each link is `[{label, href, kind?}]`. When `href` is a local file such as a PDF, it is copied into the site. `textFormat` is `markdown` or `html`. `theme` takes `{accent, accentDark, logoText}`. `accent` colours the header and the primary buttons. `accentDark` sets the link colour in dark mode and is derived automatically when it is omitted. `logoText` holds up to 3 characters for the badge.
 
 ### issues
 

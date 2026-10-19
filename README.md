@@ -1,6 +1,10 @@
 # review-kit
 
-Track what a round of review and fixing changed: **issues found, fixes shipped with before/after screenshots, and what is left**. Keep it all in one `review.json`, then publish it as a fast, offline, mobile-first static site.
+Track what a round of review and fixing changed: **issues found, fixes shipped with their evidence, and what is left**. Keep it all in one `review.json`, then publish it as a fast, offline, mobile-first static site.
+
+There are two kinds of review. A **UI/UX review** records before/after screenshots. A **backend review** records code practice findings (security, correctness, errors, API design, architecture, tests), with tests and command output as evidence. Each kind has an agent playbook and optional [companion skills](#companion-skills).
+
+Agents using the skill **report first and fix only when told**. A review run records the problems and stops. Then you choose which issues to fix, for example "fix m-1 and m-3" or "do the P0s".
 
 - **One data file.** `review.json` holds issues, fixes and the plan. It follows a versioned format with a [JSON Schema](schema/review.schema.json) ([format reference](docs/format.md)).
 - **Zero dependencies.** It needs only Python 3.8+ (standard library). The site is vanilla HTML, CSS and JS: no CDN, no build step, and it works from `file://`.
@@ -17,43 +21,51 @@ Track what a round of review and fixing changed: **issues found, fixes shipped w
 curl -fsSL https://raw.githubusercontent.com/NicholasErlin/review-kit/main/install.sh | bash
 ```
 
-Run it again any time to update. If you already have a clone, run `./install.sh` from it instead. Use `--skills-dir DIR` to link the skill into other agents' skills folders (repeatable), `--dir` to install somewhere else, and `--no-skill` to skip the skill. Without network access to the repo, `git clone` it however you can and run `install.sh` from the clone.
+Run it again any time to update. If you already have a clone, run `./install.sh` from it instead. Options:
+
+- `--with-companions` also links the bundled [companion skills](#companion-skills) into the skills folders.
+- `--skills-dir DIR` links the skill into other agents' skills folders. Repeatable.
+- `--dir DIR` installs somewhere else.
+- `--no-skill` skips the skill.
+ Without network access to the repo, `git clone` it however you can and run `install.sh` from the clone.
 
 **2. Attach it to a repo once per project:**
 
 ```bash
 cd your-project
-review-kit attach --name "Your App" --platforms mobile,desktop
+review-kit attach --name "Your App" --kind ui,backend      # or just --kind ui (the default) or --kind backend
 ```
 
-This creates `.review/` (`review.json`, `screenshots/`, `pending/` and a `.gitignore` for the built site). It also adds a short pointer to the repo's `AGENTS.md`, and to `CLAUDE.md` if there is one, so any coding agent in the repo knows to use the skill. Commit those files to share the setup with your team. Re-running `attach` is safe: it reuses the review and updates the pointer in place. `--no-agents-file` skips the pointer, and `--agents-file FILE` picks other files.
+This creates one review per kind, `.review/ui/` and `.review/backend/`. Each has a `review.json`, `screenshots/`, `pending/`, and a `.gitignore` for the built site. UI reviews default to `--platforms mobile,desktop`. It also adds a short pointer to the repo's `AGENTS.md`, and to `CLAUDE.md` if there is one, so any coding agent in the repo knows to use the skill. Commit those files to share the setup with your team. Re-running `attach` is safe: it reuses the review and updates the pointer in place. `--no-agents-file` skips the pointer, and `--agents-file FILE` picks other files.
 
-**3. Use it.** Ask your agent for fixes with a review ("fix the mobile layout issues and record before/after screenshots"), or drive it yourself:
+**3. Use it.** Ask your agent for a review ("run review-kit on the UI"). It reports the issues and waits. Then tell it which to fix, and it records each fix with its evidence. You can also drive it yourself:
 
 ```bash
-review-kit add-issue --title "Save is hidden behind the bottom nav" --platform mobile --severity P0 --area Editor
-review-kit add-fix --title "Sticky Save bar" --files src/Form.tsx \
+review-kit add-issue ui --title "Save is hidden behind the bottom nav" --platform mobile --severity P0 --area Editor
+review-kit add-fix ui --title "Sticky Save bar" --files src/Form.tsx \
   --pair mobile before.png after.png --resolves m-1
-review-kit serve --watch                       # builds .review/site and previews on localhost
+review-kit add-issue backend --title "No size limit on uploads" --severity P1 --area api --where "api/upload.py:40"
+review-kit serve ui --watch                    # builds .review/ui/site and previews on localhost
 ```
 
-Commands with no review path look for `review.json`, `.review/review.json`, `docs/review/review.json` or `review/review.json`. You can also run the kit as `python3 -m reviewkit` from the repo root.
+The first argument is a path to a `review.json` or its folder, or a kind (`ui`, `backend`) meaning `.review/<kind>/`. With no argument, commands look for `review.json`, `.review/review.json`, `docs/review/review.json` and `review/review.json`, then for a single `.review/<kind>/review.json`. You can also run the kit as `python3 -m reviewkit` from the repo root.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `attach [REPO]` | Sets a repo up in one step: creates `.review/` if the repo has no review yet (same options as `init`, with `--dir` for the folder), and adds or updates a review-kit pointer in `AGENTS.md`, plus `CLAUDE.md` if present. `--agents-file FILE` (repeatable) and `--no-agents-file` change which files get the pointer. |
-| `init [DIR]` | Scaffolds `DIR/review.json`, `screenshots/`, `pending/` and a `.gitignore`. DIR defaults to `.review`. Options: `--name`, `--title`, `--platforms a,b`, `--accent "#hex"`, `--ignore-screenshots`. |
+| `attach [REPO]` | Sets a repo up in one step. For each `--kind` (`ui`, `backend`; default `ui`), it creates `.review/<kind>/` unless that review already exists; `--dir` changes the parent folder. It then adds or updates a review-kit pointer in `AGENTS.md`, plus `CLAUDE.md` if present. `--agents-file FILE` (repeatable) and `--no-agents-file` change which files get the pointer. |
+| `init [DIR]` | Scaffolds `DIR/review.json`, `screenshots/`, `pending/` and a `.gitignore`. DIR defaults to `.review`. Options: `--kind ui\|backend` (sets the title and platform defaults), `--name`, `--title`, `--platforms a,b`, `--accent "#hex"`, `--ignore-screenshots`. |
 | `validate [REVIEW]` | Checks the file against the schema and its cross-references: unknown platforms, severities, issue or fix ids, duplicate ids and missing images. |
 | `build [REVIEW] [--out DIR]` | Validates, copies the referenced images, and writes `index.html`, `app.css`, `app.js` and `data.js`. The output goes to `site/` next to `review.json` by default. `--max-width N` downscales PNG/JPEG with `sips` or ImageMagick when available. Without them, images are copied unchanged. |
-| `serve [REVIEW\|SITE] [--port 8787] [--host 127.0.0.1] [--watch]` | Builds, then previews locally. Add `--host 0.0.0.0` to share on your network without a login. `--watch` rebuilds when `review.json` or `screenshots/` change. |
+| `serve [REVIEW\|SITE] [--port 8787] [--host 127.0.0.1] [--watch]` | Builds, then previews locally. Bound to `127.0.0.1` (the default), it only answers requests addressed to `localhost`, `127.0.0.1` or `[::1]`, which blocks DNS-rebinding pages. Add `--host 0.0.0.0` to share on your network without a login. `--watch` rebuilds when `review.json` or `screenshots/` change. |
 | `add-issue` | Adds issues from flags (`--title --platform --severity --area --status --details --note --where --screenshot --top`) or from `--json`/`--file`, which take one object or a list. `--update` merges into an existing id. |
 | `add-fix` | Adds a fix from flags (`--title --summary --files --pair PLATFORM BEFORE AFTER --resolves ids --partial ids --commit --link Label=URL`) or from `--json`/`--file`. The JSON can be a bare fix or a hand-off envelope. It assigns the next number and today's date. |
 | `add-plan` | Adds a roadmap item: `--group --title --phase --status --effort --files --severity`. |
-| `mark STATUS ID...` | Sets the status of issues (`open partial fixed notabug wontfix`) or plan items (`todo doing partial done dropped`). `--note` adds a note and `--fix` links the item to a fix. |
+| `mark [REVIEW] STATUS ID...` | Sets the status of issues (`open partial fixed notabug wontfix`) or plan items (`todo doing partial done dropped`). `--note` adds a note and `--fix` links the item to a fix. |
 | `apply-pending [REVIEW]` | Merges every `pending/*.json` in natural order and renames each one to `*.applied.json`. It stops at the first file that would not validate. |
-| `clean [REVIEW] [--orphans] [--dry-run]` | Removes the built `site/` (only a folder review-kit built), and the `pending/*.applied.json` files that have been merged. `--orphans` also deletes screenshots that `review.json` no longer references. `--keep-site` and `--keep-applied` skip a part, and `--dry-run` only lists what would go. |
+| `clean [REVIEW] [--orphans] [--dry-run]` | Removes the built `site/` (only a folder review-kit built), and the `pending/*.applied.json` files that have been merged. `--orphans` also deletes screenshots that `review.json` no longer references, keeping any that unmerged `pending/*.json` files use. `--keep-site` and `--keep-applied` skip a part, and `--dry-run` only lists what would go. |
+| `companions [install\|update]` | Lists the companion skills for each kind and which copy will be used: an installed one if present, otherwise the bundled one. `install` links the bundled copies into `~/.claude/skills`, so the agent loads them as skills (`--skills-dir DIR` picks other folders). `update` is for maintainers and re-downloads the bundle from the pinned commits. `--kind` limits it to one kind, and `--path NAME` prints one skill's folder. |
 | `home` | Prints the folder the kit is installed in, for the docs, the skill and `capture/shot.mjs`. |
 | `summary [REVIEW]` | Prints a Markdown progress summary: totals, counts by severity and platform, latest fixes, and the most severe open issues. |
 
@@ -68,7 +80,7 @@ Image paths given on the command line or in hand-off files can be absolute. They
 `serve` is a normal foreground process. To keep it alive after the terminal or an agent's tool call ends, detach it:
 
 ```bash
-nohup review-kit serve .review/review.json --port 8787 --watch > /tmp/review-kit.log 2>&1 &
+nohup review-kit serve .review/ui/review.json --port 8787 --watch > /tmp/review-kit.log 2>&1 &
 disown
 ```
 
@@ -94,7 +106,7 @@ The repository and newly initialized reviews ignore common environment, private-
 
 ```bash
 node "$(review-kit home)/capture/shot.mjs" --url http://localhost:3000/settings \
-  --out .review/screenshots/fix-3/settings-before-mobile.png --viewport mobile [--full] [--dark] \
+  --out .review/ui/screenshots/fix-3/settings-before-mobile.png --viewport mobile [--full] [--dark] \
   [--storage state.json] [--steps steps.mjs] [--wait-for "main"] [--selector ".dialog"]
 ```
 
@@ -103,14 +115,15 @@ Take the **before** shot before you edit any code. Then take the **after** shot 
 ## Layout
 
 ```
-install.sh                 installer and updater (kit, PATH link, agent skill)
+install.sh                 installer and updater (kit, PATH link, agent skill, optional companion links)
 bin/review-kit             launcher (symlink-safe)
-reviewkit/                 Python package: cli, build, validate, markdown, images, edit, attach, clean, serve, summary
+reviewkit/                 Python package: cli, build, validate, markdown, images, edit, attach, companions, clean, serve, summary
 reviewkit/site/            the site template (index.html, app.css, app.js)
 schema/review.schema.json  the format (version 1)
 capture/shot.mjs           Playwright screenshot helper
 docs/                      format reference, workflow and hand-off contract
-skill/review-kit/SKILL.md  agent skill: instructions any coding agent can follow
+skill/review-kit/          agent skill: SKILL.md, plus ui-review.md and backend-review.md playbooks
+skill/companions/          bundled third-party skills (ui-ux-pro-max, wshobson/agents), each with LICENSE and SOURCE
 examples/demo/             small synthetic review (committed, self-contained)
 examples/basic-app/        a tiny real web app reviewed end to end by run.sh (committed output in review/)
 tests/                     unittest suites + Playwright smoke test
@@ -134,6 +147,25 @@ The file uses the `SKILL.md` format: a short YAML header (`name`, `description`)
 - **Any other agent:** paste the body of `SKILL.md` into its prompt or task, or tell it to read `$(review-kit home)/skill/review-kit/SKILL.md` first.
 
 The skill finds the kit through `review-kit` on PATH and `review-kit home`, so the kit can live anywhere.
+
+## Companion skills
+
+Each review kind has its own playbook next to `SKILL.md`. Each playbook leans on skills other people maintain. They are MIT licensed, and review-kit bundles them in [`skill/companions/`](skill/companions). Each folder keeps the upstream `LICENSE` and a `SOURCE` file with the exact commit it came from:
+
+| Kind | Playbook | Companion skills | Source |
+| --- | --- | --- | --- |
+| `ui` | [ui-review.md](skill/review-kit/ui-review.md) | `ui-ux-pro-max`: searchable UX rules (accessibility, touch, layout, type, forms, navigation) to cite and rank findings | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) (MIT) |
+| `backend` | [backend-review.md](skill/review-kit/backend-review.md) | `api-design-principles`, `architecture-patterns`, `error-handling-patterns` | [wshobson/agents](https://github.com/wshobson/agents) (MIT) |
+
+```bash
+review-kit companions                      # which copy each review uses
+review-kit companions install              # link the bundled copies into ~/.claude/skills (no download)
+review-kit companions install --kind ui --skills-dir ~/.agents/skills
+```
+
+- Agents read the bundled copies through `review-kit companions` even when the skills aren't installed. `install` (or `install.sh --with-companions`) only makes them load as skills in their own right.
+- An install never replaces a skill you already have; it only reports it. If you installed the same skill another way, for example as a Claude Code plugin, `review-kit companions` uses that copy.
+- To move to newer upstream versions, bump the commit hashes in `reviewkit/companions.py`, run `review-kit companions update`, and review the diff.
 
 ## License
 

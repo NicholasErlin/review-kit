@@ -9,24 +9,31 @@
 #   --bin DIR          where to link the `review-kit` command (default ~/.local/bin)
 #   --skills-dir DIR   also link the skill into this agent skills folder (repeatable)
 #   --no-skill         don't link the skill anywhere
+#   --with-companions  also link the bundled skills UI/UX and backend reviews use (ui-ux-pro-max, and
+#                      api-design-principles, architecture-patterns, error-handling-patterns from wshobson/agents)
 #
 # The skill is symlinked, not copied, so `git pull` in the kit (or re-running this script) keeps it current.
 # By default it is linked into ~/.claude/skills when ~/.claude exists. Pass --skills-dir for other agents.
 # Environment: REVIEW_KIT_REPO overrides the git URL to clone.
 set -euo pipefail
 
+# Everything runs from main(), called on the last line: if `curl | bash` is cut off mid-download, bash only
+# sees an unfinished function definition and runs nothing.
+main() {
 REPO="${REVIEW_KIT_REPO:-https://github.com/NicholasErlin/review-kit.git}"
 DIR=""
 BIN="$HOME/.local/bin"
 SKILLS=()
 NO_SKILL=0
+COMPANIONS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     --bin) BIN="$2"; shift 2 ;;
     --skills-dir) SKILLS+=("$2"); shift 2 ;;
     --no-skill) NO_SKILL=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --with-companions) COMPANIONS=1; shift ;;
+    -h|--help) sed -n '2,18p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -98,6 +105,17 @@ if [ "$NO_SKILL" = 0 ]; then
   fi
 fi
 
+# ---------------------------------------------------------------- 4. companion skills (optional)
+if [ "$COMPANIONS" = 1 ]; then
+  args=()
+  for d in ${SKILLS[@]+"${SKILLS[@]}"}; do args+=(--skills-dir "$d"); done
+  python3 "$DIR/bin/review-kit" companions install ${args[@]+"${args[@]}"}
+fi
+
 say ""
 say "review-kit $(python3 "$DIR/bin/review-kit" --version | awk '{print $2}') is ready. In a repo, run:"
-say "  review-kit attach --name \"My App\" --platforms mobile,desktop"
+say "  review-kit attach --name \"My App\" --kind ui,backend"
+[ "$COMPANIONS" = 1 ] || say "Optional companion skills for UI/UX and backend reviews: review-kit companions"
+}
+
+main "$@"

@@ -1,6 +1,7 @@
 """Commands that create or update review.json: init, add-issue, add-fix, add-plan, mark, apply-pending."""
 import copy
 import datetime
+import filecmp
 import os
 import re
 import shutil
@@ -12,7 +13,8 @@ PENDING_KEYS = {'fix', 'issues', 'marks', 'plan'}
 
 
 # ---------------------------------------------------------------- init
-def init(directory, name, title='Review', platforms=('mobile', 'desktop'), ignore_screenshots=False, accent=None):
+def init(directory, name, title='Review', platforms=('mobile', 'desktop'), ignore_screenshots=False, accent=None,
+         kind=None):
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, 'review.json')
     if os.path.exists(path):
@@ -30,6 +32,8 @@ def init(directory, name, title='Review', platforms=('mobile', 'desktop'), ignor
         'severities': copy.deepcopy(model.DEFAULT_SEVERITIES),
         'areas': [], 'issues': [], 'fixes': [], 'plan': [],
     }
+    if kind:
+        data['project']['kind'] = kind
     if accent:
         data['project']['theme'] = {'accent': accent}
     model.save(path, data)
@@ -85,8 +89,12 @@ def _import_image(img, review_dir, subdir):
     else:
         dest_dir = os.path.join(rd, 'screenshots', subdir)
         os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, os.path.basename(src))
-        if os.path.abspath(dest) != os.path.abspath(src):
+        stem, ext = os.path.splitext(os.path.basename(src))
+        dest, n = os.path.join(dest_dir, stem + ext), 2
+        # Never overwrite a different image that already has this name (before/ and after/ folders often share names).
+        while os.path.exists(dest) and not filecmp.cmp(src, dest, shallow=False):
+            dest, n = os.path.join(dest_dir, f'{stem}-{n}{ext}'), n + 1
+        if not os.path.exists(dest):
             shutil.copy2(src, dest)
         rel = os.path.relpath(dest, rd)
     rel = rel.replace(os.sep, '/')
@@ -247,8 +255,55 @@ def normalise_envelope(obj):
         unknown = set(obj) - PENDING_KEYS
         if unknown:
             raise ReviewError(f'unknown hand-off keys: {", ".join(sorted(unknown))} (allowed: {", ".join(sorted(PENDING_KEYS))})')
-        return obj
-    return {'fix': obj}
+        env = obj
+    else:
+        env = {'fix': obj}
+    errors = _envelope_errors(env)
+    if errors:
+        raise ReviewError('invalid hand-off:\n  ' + '\n  '.join(errors))
+    return env
+
+
+def _shape_errors(value, ref, where, ignore=()):
+    """Schema errors for one hand-off object; ids and titles may still be filled in later, so nothing is required."""
+    schema = model.load_schema()
+    sub = dict(schema['$defs'][ref])
+    sub.pop('required', None)
+    if isinstance(value, dict):
+        value = {k: v for k, v in value.items() if k not in ignore}
+    return validate.SchemaValidator(schema).errors(value, sub, where)
+
+
+def _envelope_errors(env):
+    errors = []
+    if env.get('fix') is not None:
+        errors += _shape_errors(env['fix'], 'fix', 'fix', ignore={'marks'})
+    marks = list(env.get('marks') or [])
+    if isinstance(env.get('fix'), dict):
+        marks += env['fix'].get('marks') or []
+    for key, ref, ignore in (('issues', 'issue', ()), ('plan', 'planItem', ('group',)), ('marks', None, ())):
+        items = marks if key == 'marks' else env.get(key)
+        if items is None:
+            continue
+        if not isinstance(items, list):
+            errors.append(f'{key}: expected a list, got {type(items).__name__}')
+            continue
+        for i, it in enumerate(items):
+            if ref:
+                errors += _shape_errors(it, ref, f'{key}[{i}]', ignore)
+            elif not isinstance(it, dict) or not isinstance(it.get('status'), str):
+                errors.append(f'{key}[{i}]: expected {{"issue"|"plan": id, "status": ...}}')
+    return errors
+
+
+def load_checked(path):
+    """Load review.json for editing, refusing a document whose shape the editing code cannot rely on."""
+    data = model.load(path)
+    errors = validate.SchemaValidator(model.load_schema()).errors(data)
+    if errors:
+        raise ReviewError(f'{path} is not a valid review (run `review-kit validate` for details):\n  '
+                          + '\n  '.join(errors[:5]))
+    return data
 
 
 def merge(data, envelope, review_dir, update=False):
@@ -297,7 +352,7 @@ def apply_pending(review_path, pending_dir=None):
     names = sorted((n for n in os.listdir(pending_dir) if n.endswith('.json') and not n.endswith('.applied.json')), key=natural)
     results = []
     for n in names:
-        data = model.load(review_path)
+        data = load_checked(review_path)
         p = os.path.join(pending_dir, n)
         env = model.load(p)
         log = merge(data, env, review_dir)

@@ -1,0 +1,409 @@
+{
+  "$schema": "https://raw.githubusercontent.com/NicholasErlin/review-kit/main/schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "review-kit",
+    "title": "Backend review",
+    "date": "2026-10-19",
+    "links": [],
+    "kind": "backend",
+    "theme": {
+      "accent": "#2f5d50"
+    }
+  },
+  "platforms": [
+    {
+      "id": "default",
+      "label": "Default",
+      "shape": "auto"
+    }
+  ],
+  "severities": [
+    {
+      "id": "P0",
+      "label": "P0",
+      "color": "#c62828",
+      "description": "Critical: broken flow, data loss or blocker"
+    },
+    {
+      "id": "P1",
+      "label": "P1",
+      "color": "#b45f00",
+      "description": "Major: clearly wrong or painful, has a workaround"
+    },
+    {
+      "id": "P2",
+      "label": "P2",
+      "color": "#2f7d5b",
+      "description": "Minor: polish and consistency"
+    }
+  ],
+  "areas": [],
+  "issues": [
+    {
+      "area": "edit",
+      "severity": "P0",
+      "title": "Importing absolute screenshots overwrites other images that share a basename",
+      "details": "`_import_image` copies every absolute path to `screenshots/<subdir>/<basename>` with `shutil.copy2` and no collision check. Two images with the same file name silently overwrite each other:\n\n- `add-fix --pair web /tmp/a/home.png /tmp/b/home.png` gives `before` and `after` the same file, `screenshots/fix-1/home.png` (the *after* bytes). The comparison shows the after image twice.\n- Two `add-issue --screenshot .../home.png` calls share `screenshots/issues/home.png`, so the second issue replaces the first issue's evidence.\n\nReproduced: `shasum` of the stored file equals `b/home.png` in both cases. This corrupts recorded evidence on normal input. Before/after shots captured into per-phase folders are a common layout.\n\nPractice (error-handling-patterns): fail fast or pick a unique name rather than silently replacing existing data. Fix: if the destination exists with different content, use `_unique` for the name (`home-2.png`), or hash-suffix it.",
+      "where": "reviewkit/edit.py:91",
+      "top": true,
+      "id": "issue-1",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "clean",
+      "severity": "P1",
+      "title": "clean --orphans deletes screenshots that unapplied pending hand-off files reference",
+      "details": "`orphans()` only collects references from `review.json`. Fix agents are told (SKILL.md section 5) to capture into `screenshots/fix7/` and write `pending/fix7.json`. Until `apply-pending` runs, or while a pending file is waiting because it failed validation, those shots look orphaned.\n\nReproduced: with `pending/fix7.json` pointing at `screenshots/fix7/before.png`, `review-kit clean r --orphans --dry-run` prints `would remove: r/screenshots/fix7/before.png`. Without `--dry-run`, the evidence is lost before it is merged.\n\nPractice (error-handling-patterns, \"Fail Fast\"/\"Handle at Right Level\"): a destructive operation should consider all known data sources, or refuse while pending/*.json exists. Fix: also add refs from un-applied `pending/*.json`, using `edit.normalise_envelope` and the same image walk, or skip `--orphans` with a warning while pending files exist.",
+      "where": "reviewkit/clean.py:40",
+      "top": true,
+      "id": "issue-2",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "cli",
+      "severity": "P1",
+      "title": "Malformed input and OS errors escape as Python tracebacks instead of a clean error",
+      "details": "`main()` only catches `ReviewError`. Data loaded from review.json or a hand-off file is mutated *before* it is validated (`edit.check` runs after `merge`/`upsert_issue`). So structurally wrong input crashes deep inside the code:\n\n- `pending/fix8.json` = `{\"issues\":\"x\"}` then `apply-pending` gives `AttributeError: 'str' object has no attribute 'get'` (edit.py:262).\n- `review-kit companions --kind foo` gives `KeyError: 'foo'` (cli.py:271; only `install` goes through `_wanted`, which validates kinds).\n- `PermissionError`/`OSError` from saves, copies and attach writes also become tracebacks.\n\nThe exit code is still 1, but the message is a stack trace aimed at the developer. The envelope shape is never schema-checked.\n\nPractice (error-handling-patterns): \"Fail Fast: validate input early\" and \"Meaningful Messages\". Practice (api-design-principles): a stable, documented error format. Fix: validate the envelope shape in `normalise_envelope` (issues/plan must be lists of objects, fix an object, marks a list). Validate kinds in `cmd_companions` for every action. Map `OSError` to `review-kit: <path>: <strerror>` in `main`.",
+      "where": "reviewkit/cli.py:435",
+      "id": "issue-3",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "build",
+      "severity": "P1",
+      "title": "Site asset paths collide after character sanitising, so one image replaces another",
+      "details": "`_Assets._dest` replaces every character outside `[A-Za-z0-9._/-]` with `_` and does not check for collisions. `screenshots/a b.png` and `screenshots/a_b.png` both map to `img/screenshots/a_b.png`. `self.files` keeps only the last source, so both issues display the same picture. Each gets its own `?v=` fingerprint, which hides the problem.\n\nReproduced: `data.js` lists `img/screenshots/a_b.png?v=94cc563afd` and `img/screenshots/a_b.png?v=c1cc2d0d41`, but only one file is published. Non-ASCII names (`über.png` / `_ber.png`) collide the same way.\n\nFix: when `dest` is already taken by a different source, add a short hash of the source path to the name.",
+      "where": "reviewkit/build.py:38",
+      "id": "issue-4",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "images",
+      "severity": "P2",
+      "title": "publish() skips copying when the new source has an older mtime, so the site shows stale images",
+      "details": "`publish` treats `mtime(dst) >= mtime(src)` as \"unchanged\". `shutil.copy2`, used here and by `_import_image`, preserves mtimes. So if a source is replaced by a file with an older timestamp (a re-imported capture, `cp -p`, restore from backup, `git checkout` of an older blob on some setups), the build keeps the old bytes. The `?v=` fingerprint is computed from the new source, so even cache-busting points at stale content.\n\nReproduced: replacing `screenshots/old.png` with an older-mtime file left `site/img/screenshots/old.png` at the previous hash after `review-kit build`.\n\nFix: compare `(size, mtime)` for equality instead of `>=`, or record the fingerprint per dest in the marker manifest. For resized images, store the source fingerprint and max width.",
+      "where": "reviewkit/images.py:90",
+      "id": "issue-5",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "validate",
+      "severity": "P2",
+      "title": "Schema patterns use re.search, so $ accepts a trailing newline (ids ending in a newline validate)",
+      "details": "JSON Schema patterns follow ECMA-262, where `$` without the `m` flag matches only at the very end. Python's `$` also matches before a final `\\n`. So the id pattern `^[A-Za-z0-9][A-Za-z0-9._:-]*$` accepts `\"abc\\n\"`.\n\nReproduced: `review-kit add-issue r --id $'abc\\n' --title x` succeeded and `validate` reported the file valid. Colours (`#fff\\n`) pass the same way. Ids end up in HTML attributes, URLs (`#/issues`) and CLI lookups, where a hidden newline breaks matching.\n\nFix: translate a trailing `$` to `\\Z`, or use `re.fullmatch`-equivalent semantics for anchored patterns.",
+      "where": "reviewkit/validate.py:61",
+      "id": "issue-6",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "companions",
+      "severity": "P2",
+      "title": "Companion download has no size cap and corrupt archives raise tarfile tracebacks",
+      "details": "`_download` does `r.read()` with no limit, so a whole response is buffered in memory. Only `OSError` is mapped to `ReviewError`. A truncated or HTML response makes `tarfile.open` raise `tarfile.ReadError`, and a short read raises `http.client.IncompleteRead`. Both escape as tracebacks. No content digest is checked: integrity relies on TLS plus the pinned commit, which is acceptable but undocumented.\n\nThe extraction itself looks sound. It rejects `..`/absolute members, skips links and devices, and stages into `.partial` before renaming.\n\nPractice (error-handling-patterns): \"Meaningful Messages\", and bounded resources on every network call. Fix: read in chunks up to a cap (for example 50 MB), and catch `(tarfile.TarError, http.client.HTTPException)` and turn them into `ReviewError`. Optionally pin a sha256 per source.",
+      "where": "reviewkit/companions.py:88",
+      "id": "issue-7",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "serve",
+      "severity": "P2",
+      "title": "Local server does not check the Host header (DNS-rebinding exposure of the review)",
+      "details": "`_Handler` serves any request regardless of `Host`. A web page the user visits can use DNS rebinding to point its own hostname at 127.0.0.1:8787 and read the built review (code paths, issue details, screenshots) same-origin. CSP and `nosniff` do not help, because the attacker page reads the responses. The exposure is read-only, but reviews often contain internal details.\n\nPractice (backend playbook, Security): safe defaults and deny by default. Fix: when bound to a loopback host, reject requests whose `Host` is not `localhost`, `127.0.0.1` or `[::1]` (with or without the port), and answer 421/403.",
+      "where": "reviewkit/serve.py:17",
+      "id": "issue-8",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "serve",
+      "severity": "P2",
+      "title": "--watch rebuild thread dies silently on non-ReviewError failures and misses deletions",
+      "details": "`_watch` only catches `ReviewError` around `builder.build`. Any `OSError` (file removed mid-copy, permission denied) or unexpected exception kills the daemon thread, and auto-rebuild stops with only a stderr traceback while the server keeps serving stale pages. `mtimes()` also uses `max()` of mtimes, so deleting a screenshot does not trigger a rebuild. `data.js` is written non-atomically, so a page load during a rebuild can read a half-written file.\n\nPractice (error-handling-patterns): \"Don't Swallow Errors\", but keep the long-running loop alive: catch `Exception` inside the loop, log it, continue. Fix: also hash the (path, mtime) list instead of using `max`, and write `data.js` via temp+rename like `model.save`.",
+      "where": "reviewkit/serve.py:119",
+      "id": "issue-9",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "attach",
+      "severity": "P2",
+      "title": "attach rewrites AGENTS.md/CLAUDE.md in place (non-atomic)",
+      "details": "`_write_pointer` opens the user's existing instructions file with `'w'` and writes the new content. An interrupted write (disk full, crash) truncates a hand-written file that review-kit does not own. `review.json` already uses `model.save` (temp file + `os.replace`).\n\nPractice (backend playbook, Data): atomic writes for files. Fix: write through a temp file in the same folder and replace, and keep the original file mode.",
+      "where": "reviewkit/attach.py:77",
+      "id": "issue-10",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "install",
+      "severity": "P2",
+      "title": "install.sh is not wrapped in a function, so a truncated curl|bash download runs partially",
+      "details": "The script is designed for `curl -fsSL ... | bash`. bash executes it line by line as it streams, so a connection cut mid-download runs a prefix of the script, for example cloning without linking, or stopping inside `link_skill` after `rm \"$target\"`. The standard guard is to put the body in `main() { ... }` and call `main \"$@\"` on the last line.\n\nMinor related points: `-h` prints nothing when piped (`$0` is `bash`). `--no-skill --with-companions` still links companions into `~/.claude/skills`, because `companions install` falls back to its default when no `--skills-dir` is passed.",
+      "where": "install.sh:18",
+      "id": "issue-11",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "cli",
+      "severity": "P2",
+      "title": "mark takes the review only via -r while every other command takes it positionally",
+      "details": "`review-kit add-issue backend ...` and `build backend` take the review as the first positional argument, but `mark` needs `review-kit mark -r backend fixed id`. `review-kit mark backend fixed b-1` instead treats `backend` as the status and fails. This is easy to get wrong for agents following the SKILL.md pattern \"pass the kind as the review argument\".\n\nPractice (api-design-principles): Consistent Naming. Inconsistent interfaces frustrate callers. Fix: accept a leading kind/path positional when it matches a known review (`ui`/`backend` or an existing path), or document `-r` prominently.",
+      "where": "reviewkit/cli.py:386",
+      "id": "issue-12",
+      "status": "fixed",
+      "platform": "default"
+    },
+    {
+      "area": "tests",
+      "severity": "P2",
+      "title": "Test gaps on the risky paths: name collisions, pending refs, malformed envelopes, CLI exit codes",
+      "details": "All 79 tests pass. None of them covers the failure modes above:\n\n- importing two screenshots with the same basename\n- `clean --orphans` with pending hand-offs\n- `apply-pending` with a wrongly shaped envelope\n- `main()` exit code and message for OS errors or unknown kinds\n- site asset name collisions\n- `publish` with an older source mtime\n- `companions install` with a corrupt archive (the `opener` seam already makes this testable without network)\n\nPractice (backend playbook, Tests): risky paths have tests, including failure paths.",
+      "where": "tests/test_clean.py:34",
+      "id": "issue-13",
+      "status": "fixed",
+      "platform": "default"
+    }
+  ],
+  "fixes": [
+    {
+      "title": "Collision-safe names for imported screenshots and published site assets",
+      "summary": "**Problem.** `edit._import_image` copied absolute screenshots to `screenshots/<sub>/<basename>` and overwrote whatever was there, so `--pair web /tmp/a/home.png /tmp/b/home.png` stored the after image as both sides, and a second issue's `home.png` replaced the first issue's evidence (issue-1). `build._Assets._dest` replaced odd characters with `_`, so `a b.png` and `a_b.png` were published to one site path and showed the same picture (issue-4).\n\n**Change.** Import: if the destination exists with *different* bytes (`filecmp.cmp(shallow=False)`), use `home-2.png`, `home-3.png`, ...; identical re-imports still reuse the existing copy. Build: if a sanitised site path is already taken by another source, add an 8-character hash of the source path (`img/screenshots/a_b-1c2d3e4f.png`). Practice (error-handling-patterns): don't silently replace existing data.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_same_basename_screenshots_do_not_overwrite_each_other (test_edit.EditTest)\nFAIL: test_asset_names_that_sanitise_alike_do_not_collide (test_build.BuildTest)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_edit.EditTest.test_same_basename_screenshots_do_not_overwrite_each_other test_edit.EditTest.test_reimporting_an_identical_screenshot_reuses_the_copy test_build.BuildTest.test_asset_names_that_sanitise_alike_do_not_collide\nRan 3 tests in 0.049s\nOK\n```\n\n(`test_reimporting_an_identical_screenshot_reuses_the_copy` is a guard that passed before and still passes.)",
+      "files": [
+        "reviewkit/edit.py",
+        "reviewkit/build.py",
+        "tests/test_edit.py",
+        "tests/test_build.py"
+      ],
+      "issues": [
+        "issue-1",
+        "issue-4"
+      ],
+      "number": 1,
+      "id": "fix-1",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "clean --orphans keeps screenshots that waiting pending/ hand-offs reference",
+      "summary": "**Problem.** `clean.orphans` only looked at `review.json`, so screenshots captured by fix agents into `screenshots/fix7/` were deleted by `clean --orphans` before `apply-pending` merged `pending/fix7.json`.\n\n**Change.** `orphans()` also collects references (images and local links) from every un-applied `pending/*.json`. A pending file that can't be read or isn't a valid hand-off makes `--orphans` stop with an error naming the file instead of guessing, so nothing is deleted. Practice (error-handling-patterns): fail fast before a destructive step.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_orphans_keeps_screenshots_referenced_by_pending_hand_offs (test_clean.CleanTest)\nFAIL: test_orphans_refuses_when_a_pending_file_is_unreadable (test_clean.CleanTest)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_clean.CleanTest.test_orphans_keeps_screenshots_referenced_by_pending_hand_offs test_clean.CleanTest.test_orphans_refuses_when_a_pending_file_is_unreadable\nRan 2 tests in 0.049s\nOK\n```",
+      "files": [
+        "reviewkit/clean.py",
+        "tests/test_clean.py"
+      ],
+      "issues": [
+        "issue-2"
+      ],
+      "number": 2,
+      "id": "fix-2",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "Validate hand-offs and review.json before editing; clean errors for unknown kinds and OS errors",
+      "summary": "**Problem.** Data from `review.json` and `pending/*.json` was changed before it was validated, so wrongly shaped input crashed deep inside the code (`{\"issues\":\"x\"}` gave `AttributeError`). `companions --kind foo` gave `KeyError`, and `main()` let `OSError` through as a traceback.\n\n**Change.**\n- `edit.normalise_envelope` checks the hand-off shape at the boundary against the schema's `$defs` (fix, issue, planItem, with `required` relaxed because ids are filled in later) plus a mark check. The result is `invalid hand-off: fix.platforms: expected object, got str ...`.\n- New `edit.load_checked` schema-checks `review.json` before `add-issue`, `add-fix`, `add-plan`, `mark`, `summary` and `apply-pending` edit it, and points to `review-kit validate`.\n- `cmd_companions` validates `--kind` for every action.\n- `main()` maps `OSError` to `review-kit: <file>: <reason>` with exit code 1.\n\nPractice (error-handling-patterns): \"Fail Fast: validate input early\" and \"Meaningful Messages\". Practice (api-design-principles): a consistent error format.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nERROR: test_broken_review_json_is_reported_before_editing (test_edit.EditTest)\nERROR: test_malformed_pending_envelope_is_a_clean_error (test_edit.EditTest)\nERROR: test_os_errors_are_clean_errors (test_edit.EditTest)\nERROR: test_unknown_companion_kind_is_a_clean_error (test_edit.EditTest)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_edit.EditTest.test_malformed_pending_envelope_is_a_clean_error test_edit.EditTest.test_broken_review_json_is_reported_before_editing test_edit.EditTest.test_unknown_companion_kind_is_a_clean_error test_edit.EditTest.test_os_errors_are_clean_errors\nRan 4 tests in 0.048s\nOK\n```",
+      "files": [
+        "reviewkit/edit.py",
+        "reviewkit/cli.py",
+        "tests/test_edit.py"
+      ],
+      "issues": [
+        "issue-3"
+      ],
+      "number": 3,
+      "id": "fix-3",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "Atomic writes for AGENTS.md and the site, exact-mtime publishing, and a watch loop that survives errors",
+      "summary": "**Problem.**\n- `images.publish` treated `mtime(dst) >= mtime(src)` as unchanged, so a replaced source with an older mtime left a stale image (issue-5).\n- `serve --watch` only caught `ReviewError`, so any other error killed the rebuild thread. It compared `max(mtime)`, so it missed deletions, and `data.js` was written in place (issue-9).\n- `attach` rewrote `AGENTS.md`/`CLAUDE.md` in place (issue-10).\n\n**Change.**\n- New `model.write_text`: temp file plus `os.replace`, keeping an existing file's mode. New files get the umask mode, not mkstemp's 0600, which also fixes `review.json` being saved as 0600. `model.save`, `attach._write_pointer` and the site files (`data.js`, `index.html`, `app.*`) use it.\n- `publish` keeps a file only when the mtimes match exactly (copy2 and, after resizing, `os.utime` carry the source mtime).\n- `serve` gained `_snapshot` (a sorted (path, mtime) list) and `_rebuild`, which logs any exception and keeps watching.\n\nPractice (backend playbook, Data): atomic writes. Practice (error-handling-patterns): don't swallow errors, but keep long-running loops alive.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_publish_recopies_a_replaced_source_with_an_older_mtime (test_build.ImagesTest)\nERROR: test_watch_survives_unexpected_build_errors_and_sees_deletions (test_serve.ServeTest)\nFAIL: test_pointer_write_is_atomic_and_keeps_the_file_mode (test_attach.AttachTest)  # AssertionError: 0 != 1 (AGENTS.md was rewritten in place)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_build.ImagesTest.test_publish_recopies_a_replaced_source_with_an_older_mtime test_serve.ServeTest.test_watch_survives_unexpected_build_errors_and_sees_deletions test_attach.AttachTest.test_pointer_write_is_atomic_and_keeps_the_file_mode\nRan 3 tests in 0.024s\nOK\n```",
+      "files": [
+        "reviewkit/model.py",
+        "reviewkit/attach.py",
+        "reviewkit/build.py",
+        "reviewkit/images.py",
+        "reviewkit/serve.py",
+        "tests/test_build.py",
+        "tests/test_serve.py",
+        "tests/test_attach.py"
+      ],
+      "issues": [
+        "issue-5",
+        "issue-9",
+        "issue-10"
+      ],
+      "number": 4,
+      "id": "fix-4",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "Schema patterns: a trailing $ means end of string, as in JSON Schema",
+      "summary": "**Problem.** `SchemaValidator` used `re.search(pattern)`. Python's `$` also matches before a final newline, so ids like `\"abc\\n\"` and colours like `\"#fff\\n\"` validated, unlike ECMA-262 semantics.\n\n**Change.** `_ecma_pattern` rewrites an unescaped trailing `$` to `\\Z` before matching. An escaped `\\$` is left alone.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_anchored_patterns_reject_a_trailing_newline (test_validate.SchemaTest)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_validate.SchemaTest.test_anchored_patterns_reject_a_trailing_newline\nRan 1 test in 0.001s\nOK\n```",
+      "files": [
+        "reviewkit/validate.py",
+        "tests/test_validate.py"
+      ],
+      "issues": [
+        "issue-6"
+      ],
+      "number": 5,
+      "id": "fix-5",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "Companion skills bundled; maintainer download capped and bad archives are clean errors",
+      "summary": "**Problem.** `companions install` downloaded tarballs at install time with an unbounded `r.read()`, and truncated or non-gzip responses escaped as `tarfile`/`http.client` tracebacks.\n\n**Change** (made by the coordinator). The companion skills are bundled in `skill/companions/`, so `install` only links them. Network access happens only in the maintainer command `companions update`, which reads at most `MAX_DOWNLOAD` (200 MB) and turns bad archives into `ReviewError`.\n\n**Proof.** Existing test `test_bad_downloads_are_clean_errors` passes:\n\n```\n$ cd tests && python3 -m unittest test_companions -v\ntest_bad_downloads_are_clean_errors (test_companions.CompanionsTest) ... ok\nRan 7 tests in 0.034s\nOK\n```\n\nMutation check: running the same test against an in-memory copy of `companions.py` with the `if len(blob) > limit:` check disabled fails (`FAILED (failures=1)`), so the test does guard the limit.",
+      "files": [
+        "reviewkit/companions.py",
+        "tests/test_companions.py"
+      ],
+      "issues": [
+        "issue-7"
+      ],
+      "number": 6,
+      "id": "fix-6",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "Local server answers only to local Host names (DNS-rebinding guard)",
+      "summary": "**Problem.** A server bound to 127.0.0.1 served any `Host`, so a web page could DNS-rebind its own hostname to 127.0.0.1 and read the review same-origin.\n\n**Change.** When bound to a loopback address, `_Handler.send_head` returns 403 unless the Host name is `localhost`, `127.*` or `::1` (port and case ignored). Servers deliberately shared with `--host 0.0.0.0` or a LAN IP are unchanged. Practice (backend playbook, Security): deny by default.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_loopback_server_rejects_foreign_host_headers (test_serve.ServeTest) (host='evil.example')\nFAIL: test_loopback_server_rejects_foreign_host_headers (test_serve.ServeTest) (host='evil.example:57903')\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_serve.ServeTest.test_loopback_server_rejects_foreign_host_headers\nRan 1 test in 0.531s\nOK\n```",
+      "files": [
+        "reviewkit/serve.py",
+        "tests/test_serve.py"
+      ],
+      "issues": [
+        "issue-8"
+      ],
+      "number": 7,
+      "id": "fix-7",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "install.sh runs from main() so a cut-off curl | bash download does nothing",
+      "summary": "**Problem.** `curl ... | bash` executes the script as it streams, so a connection cut mid-download ran only part of it (for example, creating `~/.local/bin` but not linking anything).\n\n**Change.** The body sits in `main() { ... }`, and `main \"$@\"` is the last line. A truncated download is an unfinished function definition, so bash runs nothing. Behaviour is otherwise unchanged; the existing `InstallTest` cases still pass.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_truncated_piped_install_does_nothing (test_attach.InstallTest)  # AssertionError: True is not false (bin/ created)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_attach.InstallTest\nRan 4 tests in 1.290s\nOK\n```",
+      "files": [
+        "install.sh",
+        "tests/test_attach.py"
+      ],
+      "issues": [
+        "issue-11"
+      ],
+      "number": 8,
+      "id": "fix-8",
+      "date": "2026-10-19"
+    },
+    {
+      "title": "mark takes the review positionally like every other command (-r still works); regression tests for all failure paths",
+      "summary": "**Problem.** `review-kit mark backend fixed issue-1` failed: `mark` only accepted the review via `-r`, unlike `add-issue backend ...` and `build backend` (issue-12). Separately, none of the risky failure paths had tests (issue-13).\n\n**Change.** `mark [review] <status> <ids...>`: when the first positional is not a status but looks like a review (a kind, a `.json` path or a folder), it is used as the review. `-r` keeps working. A missing status or ids gives a clear usage error. Practice (api-design-principles): consistent naming.\n\nissue-13 is resolved by the 17 regression tests added across these fixes: name collisions, pending refs, malformed envelopes, broken review.json, OS errors, unknown kinds, stale publish, watch errors, atomic pointer writes, pattern anchors, Host check, truncated install and `mark`. All use temp folders and no network.\n\n**Proof.** New regression tests fail before the change and pass after (run from `tests/`).\n\nBefore:\n\n```\nFAIL: test_mark_accepts_review_positionally_and_with_r (test_edit.EditTest)\n```\n\nAfter:\n\n```\n$ python3 -m unittest test_edit.EditTest.test_mark_accepts_review_positionally_and_with_r\nRan 1 test in 0.022s\nOK\n```\n\nFull suite:\n\n```\n$ python3 -m unittest discover -s tests\nRan 96 tests in 3.085s\nOK\n```",
+      "files": [
+        "reviewkit/cli.py",
+        "tests/test_edit.py",
+        "tests/test_build.py",
+        "tests/test_clean.py",
+        "tests/test_validate.py",
+        "tests/test_serve.py",
+        "tests/test_attach.py"
+      ],
+      "issues": [
+        "issue-12",
+        "issue-13"
+      ],
+      "number": 9,
+      "id": "fix-9",
+      "date": "2026-10-19"
+    }
+  ],
+  "plan": [
+    {
+      "id": "hardening-awaiting-go-ahead",
+      "title": "Hardening (awaiting go-ahead)",
+      "items": [
+        {
+          "title": "Validate hand-off envelopes and loaded review.json before mutating; map OSError to clean CLI errors",
+          "effort": "S",
+          "severity": "P1",
+          "details": "Resolves issue-3. Validate the envelope shape at the boundary in normalise_envelope; validate kinds in cmd_companions; catch OSError in main(). Add CLI exit-code tests.",
+          "files": [
+            "reviewkit/edit.py",
+            "reviewkit/cli.py"
+          ],
+          "id": "plan-validate-hand-off-envelopes-an",
+          "status": "done",
+          "fixes": [
+            "fix-3"
+          ]
+        },
+        {
+          "title": "Collision-safe file naming for imported screenshots and published assets",
+          "effort": "S",
+          "severity": "P0",
+          "details": "Resolves issue-1 and issue-4. Unique dest names when content differs (edit._import_image); hash-suffix colliding site paths (build._Assets._dest). Regression tests for both.",
+          "files": [
+            "reviewkit/edit.py",
+            "reviewkit/build.py"
+          ],
+          "id": "plan-collision-safe-file-naming-for",
+          "status": "done",
+          "fixes": [
+            "fix-1"
+          ]
+        },
+        {
+          "title": "Make clean --orphans aware of pending hand-offs",
+          "effort": "S",
+          "severity": "P1",
+          "details": "Resolves issue-2. Count refs from un-applied pending/*.json, or refuse --orphans while pending files exist.",
+          "files": [
+            "reviewkit/clean.py"
+          ],
+          "id": "plan-make-clean-orphans-aware-of-pe",
+          "status": "done",
+          "fixes": [
+            "fix-2"
+          ]
+        },
+        {
+          "title": "Atomic writes and robust long-running loops",
+          "effort": "M",
+          "severity": "P2",
+          "details": "issue-5, issue-9, issue-10: temp+rename for AGENTS.md and data.js, keep the watch loop alive on any exception, content-based change detection in publish().",
+          "files": [
+            "reviewkit/attach.py",
+            "reviewkit/build.py",
+            "reviewkit/serve.py",
+            "reviewkit/images.py"
+          ],
+          "id": "plan-atomic-writes-and-robust-long-",
+          "status": "done",
+          "fixes": [
+            "fix-4"
+          ]
+        },
+        {
+          "title": "Network and install hygiene",
+          "effort": "S",
+          "severity": "P2",
+          "details": "issue-7, issue-8, issue-11: download size cap plus tar error mapping, Host-header allowlist on loopback, main() wrapper in install.sh.",
+          "files": [
+            "reviewkit/companions.py",
+            "reviewkit/serve.py",
+            "install.sh"
+          ],
+          "id": "plan-network-and-install-hygiene",
+          "status": "done",
+          "fixes": [
+            "fix-8",
+            "fix-6",
+            "fix-7"
+          ]
+        }
+      ]
+    }
+  ]
+}

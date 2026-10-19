@@ -38,7 +38,8 @@
   function plTag(p) { return MULTI ? '<span class="badge-pl">' + esc((PL[p] || { label: p }).label).toUpperCase() + '</span>' : ''; }
   function areaTitle(it) { var a = AREA[it.area]; return a ? (a.num ? a.num + '. ' : '') + a.title : (it.area || ''); }
   function seg(name, opts, cur, cls) {
-    return '<div class="seg ' + (cls || '') + '" data-seg="' + name + '" role="group">' + opts.map(function (o) {
+    var label = { plat: 'Platform', mode: 'Comparison view' }[name] || name;
+    return '<div class="seg ' + (cls || '') + '" data-seg="' + name + '" role="group" aria-label="' + label + '">' + opts.map(function (o) {
       return '<button type="button" data-v="' + esc(o[0]) + '"' + (o[0] === cur ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + (o[2] ? ' disabled' : '') + '>' + esc(o[1]) + '</button>';
     }).join('') + '</div>';
   }
@@ -50,6 +51,8 @@
     function hex(c) { c = c.replace('#', ''); if (c.length === 3) c = c.replace(/./g, '$&$&'); return [0, 2, 4].map(function (i) { return parseInt(c.substr(i, 2), 16); }); }
     function mix(c, w, t) { return 'rgb(' + c.map(function (v, i) { return Math.round(v + (w[i] - v) * t); }).join(',') + ')'; }
     function lum(c) { return c.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce(function (a, v, i) { return a + v * [0.2126, 0.7152, 0.0722][i]; }, 0); }
+    function ratio(x, y) { var p = lum(x), q = lum(y); return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); }
+    var INK = hex('#13232a'), WHITE = [255, 255, 255];
     var a = hex(P.theme.accent);
     var light = lum(a) > 0.45;
     var brandLight = light ? mix(a, [0, 0, 0], 0.45) : P.theme.accent;
@@ -57,7 +60,7 @@
     var css = ':root{--accent:' + P.theme.accent + ';--brand:' + brandLight + ';--on-accent:' + (light ? '#13232a' : '#fff') + '}' +
       '@media (prefers-color-scheme: dark){:root{--brand:' + brandDark + '}}';
     D.severities.forEach(function (s) {
-      var dark = lum(hex(s.color)) > 0.5;
+      var dark = ratio(hex(s.color), INK) > ratio(hex(s.color), WHITE); // dark text when it reads better than white
       var sels = ['.tag.' + s.cls];
       if (/^[A-Za-z_-][A-Za-z0-9_-]*$/.test(s.id)) sels.push('.tag.' + s.id); // tags embedded in HTML content, e.g. <span class="tag P0">
       css += sels.join(',') + '{background:' + s.color + (dark ? ';color:#13232a' : '') + '}';
@@ -91,7 +94,13 @@
     renderTabs(view);
     ({ overview: viewOverview, fixes: viewFixes, issues: viewIssues, plan: viewPlan })[view](parts.slice(1).map(decodeURIComponent));
   }
-  window.addEventListener('hashchange', function () { if (!lb.ignoreHash) { route(); window.scrollTo(0, 0); } });
+  function focusView() { // keyboard and screen reader users land on the new view, not back at the top of the page
+    var h = app.querySelector('h1'); if (!h) return;
+    h.setAttribute('tabindex', '-1');
+    h.focus({ preventScroll: true });
+  }
+  window.addEventListener('hashchange', function () { if (!lb.ignoreHash) { route(); window.scrollTo(0, 0); focusView(); } });
+  document.getElementById('skip').addEventListener('click', function (e) { e.preventDefault(); focusView(); });
 
   // ------------------------------------------------------------ overview
   function counts(list) {
@@ -104,10 +113,11 @@
   function resolved(c) { return c.fixed + c.notabug + c.wontfix; }
   function bar(c, cls) {
     var t = c.total || 1;
-    return '<div class="bar ' + (cls || '') + '" role="img" aria-label="' + c.fixed + ' fixed, ' + c.partial + ' partly fixed, ' + c.open + ' open">' +
+    var label = [[c.fixed, 'fixed'], [c.notabug, 'not a bug'], [c.wontfix, 'won\'t fix'], [c.partial, 'partly fixed'], [c.open, 'open']].filter(function (x) { return x[0]; }).map(function (x) { return x[0] + ' ' + x[1]; }).join(', ');
+    return '<div class="bar ' + (cls || '') + '" role="img" aria-label="' + esc(label || 'none') + '">' +
       '<i class="f" style="width:' + pct(c.fixed, t) + '%"></i><i class="n" style="width:' + pct(c.notabug, t) + '%"></i><i class="w" style="width:' + pct(c.wontfix, t) + '%"></i><i class="p" style="width:' + pct(c.partial, t) + '%"></i></div>';
   }
-  function frac(x) { return resolved(x) + (x.partial ? ' + ' + x.partial + '◐' : '') + ' / ' + x.total; }
+  function frac(x) { return '<span title="' + resolved(x) + ' of ' + x.total + ' resolved">' + resolved(x) + ' / ' + x.total + '</span>' + (x.partial ? ' · ' + x.partial + ' partly' : ''); }
   function progressCard(title, list, sub) {
     var c = counts(list);
     var other = c.notabug + c.wontfix;
@@ -121,8 +131,22 @@
       bar(c) + '<div class="legend"><span><i style="background:var(--fixed)"></i>Fixed' + (other ? ' ' + c.fixed : '') + '</span>' +
       (c.notabug ? '<span><i style="background:var(--notabug)"></i>Not a bug ' + c.notabug + '</span>' : '') +
       (c.wontfix ? '<span><i style="background:var(--wontfix)"></i>Won\'t fix ' + c.wontfix + '</span>' : '') +
-      '<span><i style="background:var(--partial)"></i>Partly fixed</span><span><i style="background:var(--chip)"></i>Open</span><span>' + Math.round(pct(resolved(c) + c.partial / 2, c.total || 1)) + '% done</span></div>' +
+      '<span><i style="background:var(--partial)"></i>Partly fixed</span><span><i class="o" style="background:var(--chip)"></i>Open</span><span>' + Math.round(pct(resolved(c) + c.partial / 2, c.total || 1)) + '% done</span></div>' +
       rows + '</section>';
+  }
+  function planCounts(items) {
+    function n(f) { return items.filter(function (i) { return f(i.status); }).length; }
+    var c = { total: items.length, fixed: n(function (s) { return s === 'done'; }), partial: n(function (s) { return s === 'partial' || s === 'doing'; }), wontfix: n(function (s) { return s === 'dropped'; }), notabug: 0 };
+    c.open = c.total - c.fixed - c.partial - c.wontfix;
+    return c;
+  }
+  function planSummary(c) {
+    return [c.fixed + ' of ' + c.total + ' done', c.partial ? c.partial + ' in progress or partly done' : '', c.wontfix ? c.wontfix + ' dropped' : '', c.open ? c.open + ' to do' : ''].filter(Boolean).join(' · ');
+  }
+  function planLegend(c) {
+    return '<div class="legend">' + [[c.fixed, 'var(--fixed)', 'Done', ''], [c.partial, 'var(--partial)', 'In progress / partly done', ''], [c.wontfix, 'var(--wontfix)', 'Dropped', ''], [c.open, 'var(--chip)', 'To do', ' class="o"']].filter(function (x) { return x[0]; }).map(function (x) {
+      return '<span><i' + x[3] + ' style="background:' + x[1] + '"></i>' + x[2] + '</span>';
+    }).join('') + '</div>';
   }
   function issueRow(it) {
     return '<li class="toprow">' + sevTag(it.sev) + '<div class="t"><a class="row" href="#/issues/' + encodeURIComponent(it.id) + '"><div class="lf-title' + (RESOLVED[it.status] ? ' struck' : '') + '">' + esc(it.title) + '</div></a><div class="lf-meta">' + stTag(it.status) + ' ' + plTag(it.platform) + (areaTitle(it) ? ' · ' + esc(areaTitle(it)) : '') + '</div></div></li>';
@@ -174,9 +198,8 @@
       var items = [];
       D.plan.forEach(function (g) { items = items.concat(g.items); });
       if (items.length) {
-        var done = items.filter(function (i) { return i.status === 'done'; }).length, part = items.filter(function (i) { return i.status === 'partial' || i.status === 'doing'; }).length;
-        html += '<section class="card"><h2>Plan</h2><div class="small">' + done + ' of ' + items.length + ' items done' + (part ? ', ' + part + ' in progress or partly done' : '') + '</div><div style="margin:10px 0">' +
-          bar({ total: items.length, fixed: done, partial: part, open: items.length - done - part, notabug: 0, wontfix: items.filter(function (i) { return i.status === 'dropped'; }).length }) +
+        var pc = planCounts(items);
+        html += '<section class="card"><h2>Plan</h2><div class="small">' + planSummary(pc) + '</div><div style="margin:10px 0">' + bar(pc) + planLegend(pc) +
           '</div><a class="btn" href="#/plan">Open the plan</a></section>';
       }
     }
@@ -196,6 +219,7 @@
   function figHtml(f, label, cls) {
     return '<figure class="fig"><img loading="lazy" src="' + esc(f.src) + '" alt="' + esc(f.alt || label || 'Screenshot') + '" data-lb="1"' + (f.w ? ' width="' + f.w + '" height="' + f.h + '" style="height:auto"' : '') + '><figcaption>' + (label ? '<span class="' + cls + '">' + label + '</span> ' : '') + capOf(f) + '</figcaption></figure>';
   }
+  var FLIP_LABEL = ['Showing before. Press to show after.', 'Showing after. Press to show before.'];
   function pairHtml(p, mode) {
     var shared = p.cap ? '<div class="caps"><p>' + p.cap + '</p></div>' : '';
     if (!p.before || !p.after) {
@@ -205,7 +229,8 @@
     if (mode === 'side') {
       return '<div class="pair"><div class="side">' + figHtml(p.before, 'BEFORE', 'ba-before') + figHtml(p.after, 'AFTER', 'ba-after') + '</div>' + shared + '</div>';
     }
-    return '<div class="pair"><div class="cmp mode-' + mode + '" style="--x:50%" tabindex="0" role="slider" aria-label="Before / after comparison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">' +
+    var aria = mode === 'flip' ? 'role="button" aria-label="' + FLIP_LABEL[1] + '"' : 'role="slider" aria-label="Before / after comparison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"';
+    return '<div class="pair"><div class="cmp mode-' + mode + '" style="--x:50%" tabindex="0" ' + aria + '>' +
       '<img class="before" src="' + esc(p.before.src) + '" alt="Before" loading="lazy"><img class="after" src="' + esc(p.after.src) + '" alt="After" loading="lazy">' +
       '<div class="handle"></div><span class="lbl b">BEFORE</span><span class="lbl a">AFTER</span>' +
       '<button type="button" class="zoom" aria-label="View full size">⤢</button></div>' +
@@ -235,13 +260,16 @@
     var open = !Object.keys(fix.platforms).length;
     return '<details class="fix-log"' + (open ? ' open' : '') + '><summary>What changed' + (fix.date ? ' · ' + esc(fix.date) : '') + '</summary>' + parts.join('') + '</details>';
   }
-  function hasFullPair(fix) { return Object.keys(fix.platforms).some(function (p) { return fix.platforms[p].pairs.some(function (x) { return x.before && x.after; }); }); }
+  function hasPair(fix, p) { return !!fix.platforms[p] && fix.platforms[p].pairs.some(function (x) { return x.before && x.after; }); }
+  function hasFullPair(fix) { return Object.keys(fix.platforms).some(function (p) { return hasPair(fix, p); }); }
   function viewFixes(args) {
     var pref = store('fixPlat') || PLATS[0];
     var fixes = newestFixes();
     app.innerHTML = '<h1 class="view-title">Fixes <span class="small">' + D.fixes.length + ' shipped · newest first</span></h1>' + fixes.map(function (fix) {
       var avail = PLATS.filter(function (p) { return fix.platforms[p]; });
-      var plat = fix.platforms[pref] ? pref : avail[0] || pref;
+      var withPair = avail.filter(function (p) { return hasPair(fix, p); });
+      // open on the preferred platform unless it has no before / after and another platform does
+      var plat = hasPair(fix, pref) || (fix.platforms[pref] && !withPair.length) ? pref : withPair[0] || avail[0] || pref;
       var ctl = (MULTI && avail.length ? seg('plat', PLATS.map(function (p) { return [p, PL[p].label, !fix.platforms[p]]; }), plat) : '') +
         (hasFullPair(fix) ? seg('mode', [['slider', 'Slider'], ['flip', 'Tap'], ['side', 'Side by side']], defaultMode(), 'sm') : '');
       var meta = [fix.date ? esc(fix.date) : '', MULTI && avail.length ? esc(fixPlatsLabel(fix)) : ''].filter(Boolean).join(' · ');
@@ -254,7 +282,7 @@
     app.querySelectorAll('.fixcard').forEach(wireFixCard);
     if (args[0]) {
       var c = document.getElementById('fix-' + args[0]);
-      if (c) setTimeout(function () { c.scrollIntoView({ block: 'start' }); window.scrollBy(0, -64); }, 30);
+      if (c) setTimeout(function () { c.scrollIntoView({ block: 'start' }); /* scroll-padding-top keeps it below the header */ }, 30);
     }
   }
   function wireFixCard(card) {
@@ -267,6 +295,8 @@
       wireBody();
     }
     function wireBody() {
+      var ms = card.querySelector('[data-seg=mode]');
+      if (ms) ms.hidden = !hasPair(fix, card.getAttribute('data-plat')); // compare modes only where there is a pair
       card.querySelectorAll('.cmp').forEach(wireCmp);
       var imgs = Array.prototype.slice.call(card.querySelectorAll('.fb img[data-lb]'));
       imgs.forEach(function (img, i) { img.addEventListener('click', function () { lb.open(imgs.map(imgItem), i); }); });
@@ -299,10 +329,11 @@
       e.stopPropagation();
       lb.open(items, cmp.classList.contains('mode-flip') && cmp.classList.contains('show-before') ? 0 : 1);
     });
+    function flip() { var b = cmp.classList.toggle('show-before'); cmp.setAttribute('aria-label', FLIP_LABEL[b ? 0 : 1]); }
     function setPct(x) { x = Math.max(0, Math.min(100, x)); cmp.style.setProperty('--x', x + '%'); cmp.setAttribute('aria-valuenow', Math.round(x)); }
     function setX(clientX) { var r = cmp.getBoundingClientRect(); setPct(100 * (clientX - r.left) / r.width); }
     cmp.addEventListener('keydown', function (e) {
-      if (cmp.classList.contains('mode-flip')) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); cmp.classList.toggle('show-before'); } return; }
+      if (cmp.classList.contains('mode-flip')) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } return; }
       var cur = parseFloat(cmp.style.getPropertyValue('--x')) || 50;
       if (e.key === 'ArrowLeft') { e.preventDefault(); setPct(cur - 5); } else if (e.key === 'ArrowRight') { e.preventDefault(); setPct(cur + 5); }
     });
@@ -322,7 +353,7 @@
       if (!start || e.pointerId !== start.id) return;
       var moved = Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y);
       if (e.type === 'pointerup' && moved < 8) {
-        if (cmp.classList.contains('mode-flip')) cmp.classList.toggle('show-before');
+        if (cmp.classList.contains('mode-flip')) flip();
         else setX(e.clientX);
       }
       start = null; dragging = false;
@@ -355,10 +386,10 @@
     app.innerHTML = '<h1 class="view-title">Issues</h1>' +
       '<div class="filters"><div class="search"><input type="search" id="q" placeholder="Search issues…" aria-label="Search issues" value="' + esc(f.q) + '" autocomplete="off"><button type="button" class="btn" id="ftoggle" aria-expanded="' + panelOpen + '" aria-controls="fpanel">Filters<span id="fcount"></span></button></div>' +
       '<div class="fpanel' + (panelOpen ? ' open' : '') + '" id="fpanel">' +
-      (MULTI ? '<div class="frow"><label class="k">Platform</label>' + chips('plat', [['all', 'All']].concat(PLATS.map(function (p) { return [p, PL[p].label]; })), f.plat) + '</div>' : '') +
-      '<div class="frow"><label class="k">Severity</label>' + chips('sev', sevOpts, f.sev, true) + '</div>' +
-      '<div class="frow"><label class="k">Status</label>' + chips('st', USED_ST.map(function (s) { return [s, SNAME[s], 'st-chip-' + s]; }), f.st, true) + '</div>' +
-      (HAS_SUMMARY ? '<div class="frow"><label class="k">Source</label>' + chips('src', [['counted', 'Findings'], ['summary', 'Summary rows'], ['all', 'Both']], f.src) + '</div>' : '') +
+      (MULTI ? '<div class="frow" role="group" aria-labelledby="fk-plat"><span class="k" id="fk-plat">Platform</span>' + chips('plat', [['all', 'All']].concat(PLATS.map(function (p) { return [p, PL[p].label]; })), f.plat) + '</div>' : '') +
+      '<div class="frow" role="group" aria-labelledby="fk-sev"><span class="k" id="fk-sev">Severity</span>' + chips('sev', sevOpts, f.sev, true) + '</div>' +
+      '<div class="frow" role="group" aria-labelledby="fk-st"><span class="k" id="fk-st">Status</span>' + chips('st', USED_ST.map(function (s) { return [s, SNAME[s], 'st-chip-' + s]; }), f.st, true) + '</div>' +
+      (HAS_SUMMARY ? '<div class="frow" role="group" aria-labelledby="fk-src"><span class="k" id="fk-src">Source</span>' + chips('src', [['counted', 'Findings'], ['summary', 'Summary rows'], ['all', 'Both']], f.src) + '</div>' : '') +
       (D.areas.length || ALL.some(function (it) { return it.area; }) ? '<div class="frow' + (MULTI && !HAS_SUMMARY ? '' : ' wide') + '"><label class="k" for="area">Area / page</label><select id="area"></select></div>' : '') +
       '</div></div>' +
       '<div class="resinfo"><span id="rcount" aria-live="polite"></span><button type="button" class="linkbtn" id="freset">Reset filters</button></div><div id="ilist"></div>';
@@ -484,7 +515,7 @@
     function body() {
       return D.plan.filter(visible).map(function (g) {
         var items = g.items;
-        var done = items.filter(function (i) { return i.status === 'done'; }).length;
+        var pc = planCounts(items);
         var has = function (k) { return items.some(function (i) { return i[k]; }); };
         var cols = [['phase', 'Phase'], ['title', 'Change'], ['files', 'Files'], ['effort', 'Effort']].filter(function (c) { return c[0] === 'title' || has(c[0]) || (c[0] === 'phase' && has('sev')); });
         function cell(i, k) {
@@ -503,7 +534,7 @@
             (i.files ? '<div class="kv">Files: ' + i.files + '</div>' : '') + '</div>';
         }).join('') + '</div>';
         return '<section class="card"><h2>' + esc(g.title) + '</h2>' + (g.intro ? '<div class="small">' + g.intro + '</div>' : '') +
-          (items.length ? '<p class="small">' + done + ' of ' + items.length + ' done</p>' + bar({ total: items.length, fixed: done, partial: items.filter(function (i) { return i.status === 'partial' || i.status === 'doing'; }).length, open: 0, notabug: 0, wontfix: items.filter(function (i) { return i.status === 'dropped'; }).length }, 'sm') + '<div style="height:10px"></div>' + desk + mob : '') + '</section>';
+          (items.length ? '<p class="small">' + planSummary(pc) + '</p>' + bar(pc, 'sm') + planLegend(pc) + '<div style="height:10px"></div>' + desk + mob : '') + '</section>';
       }).join('') + D.appendix.filter(visible).map(function (a) {
         return '<section class="card"><h2>' + esc(a.title) + '</h2><div class="appx">' + a.body + '</div></section>';
       }).join('');
@@ -570,6 +601,12 @@
     document.getElementById('lb-next').addEventListener('click', function () { show(idx + 1); });
     document.addEventListener('keydown', function (e) {
       if (root.hidden) return;
+      if (e.key === 'Tab') { // keep focus inside the dialog
+        var f = Array.prototype.filter.call(root.querySelectorAll('button, a[href]'), function (x) { return x.offsetParent !== null; });
+        var i = f.indexOf(document.activeElement);
+        if (e.shiftKey ? i <= 0 : i === f.length - 1 || i < 0) { e.preventDefault(); f[e.shiftKey ? f.length - 1 : 0].focus(); }
+        return;
+      }
       if (e.key === 'Escape') close(); else if (e.key === 'ArrowLeft') show(idx - 1); else if (e.key === 'ArrowRight') show(idx + 1);
     });
     window.addEventListener('resize', function () { if (!root.hidden) reset(); });

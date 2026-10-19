@@ -14,8 +14,29 @@ from . import build as builder, safety
 from .model import ReviewError
 
 
+LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
+
+
+def _host_name(header):
+    """'localhost:8787' -> 'localhost', '[::1]:8787' -> '::1'."""
+    header = header.strip().lower()
+    if header.startswith('['):
+        return header[1:].split(']', 1)[0]
+    return header.rsplit(':', 1)[0] if header.count(':') == 1 else header
+
+
 class _Handler(http.server.SimpleHTTPRequestHandler):
+    def _foreign_host(self):
+        """A local-only server answers only to local names, so a DNS-rebound page cannot read the review."""
+        bound = self.server.server_address[0]
+        host = self.headers.get('Host')
+        return (bound.startswith('127.') or bound == '::1') and host is not None \
+            and _host_name(host) not in LOOPBACK_HOSTS and not _host_name(host).startswith('127.')
+
     def send_head(self):
+        if self._foreign_host():
+            self.send_error(403, 'Host not allowed')
+            return None
         try:
             requested = safety.request_path(self.path)
             root = os.path.realpath(self.directory)
@@ -93,31 +114,42 @@ def _tailscale(ip):
     return a == 100 and 64 <= b <= 127  # 100.64.0.0/10 (CGNAT range used by Tailscale)
 
 
-def _watch(review_path, out, max_width, interval=1.0):
-    def mtimes():
-        base = os.path.dirname(os.path.abspath(review_path))
-        stamp = [os.path.getmtime(review_path)]
-        for sub in ('screenshots',):
-            d = os.path.join(base, sub)
-            if os.path.isdir(d):
-                for dp, _, fs in os.walk(d):
-                    stamp.extend(os.path.getmtime(os.path.join(dp, f)) for f in fs)
-        return max(stamp)
+def _snapshot(review_path):
+    """(path, mtime) of review.json and every screenshot, so edits, additions and deletions all count as changes."""
+    base = os.path.dirname(os.path.abspath(review_path))
+    stamp = [(review_path, os.path.getmtime(review_path))]
+    d = os.path.join(base, 'screenshots')
+    if os.path.isdir(d):
+        for dp, _, fs in os.walk(d):
+            stamp.extend((os.path.join(dp, f), os.path.getmtime(os.path.join(dp, f))) for f in fs)
+    return sorted(stamp)
 
-    last = mtimes()
+
+def _rebuild(review_path, out, max_width):
+    """Rebuild once. Never raises: one failed rebuild must not stop watching."""
+    try:
+        builder.build(review_path, out, max_width=max_width, quiet=True)
+    except ReviewError as e:
+        print(time.strftime('%H:%M:%S'), 'rebuild failed:', e, file=sys.stderr, flush=True)
+        return False
+    except Exception as e:  # noqa: BLE001 - keep the watcher alive, but say what happened
+        print(time.strftime('%H:%M:%S'), f'rebuild failed: {type(e).__name__}: {e}', file=sys.stderr, flush=True)
+        return False
+    print(time.strftime('%H:%M:%S'), 'rebuilt', flush=True)
+    return True
+
+
+def _watch(review_path, out, max_width, interval=1.0):
+    last = _snapshot(review_path)
     while True:
         time.sleep(interval)
         try:
-            now = mtimes()
+            now = _snapshot(review_path)
         except OSError:
             continue
         if now != last:
             last = now
-            try:
-                builder.build(review_path, out, max_width=max_width, quiet=True)
-                print(time.strftime('%H:%M:%S'), 'rebuilt', flush=True)
-            except ReviewError as e:
-                print(time.strftime('%H:%M:%S'), 'rebuild failed:', e, file=sys.stderr, flush=True)
+            _rebuild(review_path, out, max_width)
 
 
 def serve(directory, host='127.0.0.1', port=8787, review_path=None, watch=False, max_width=None):

@@ -2,13 +2,17 @@
 
 This guide is for a person or a coding agent that is working through a list of UI/UX or multi-step fixes and wants a reviewable record of the work.
 
+Reviews work in two phases. First audit and report: record issues, build the site and summarise, without changing the project. Then fix only what the user approves. Steps 1, 2 and 6 are the report phase; steps 3 to 5 run only after approval.
+
+The steps below use a UI/UX review, where the evidence is screenshots. A backend review follows the same steps with code evidence instead; see [Backend reviews](#backend-reviews) at the end.
+
 ## 1. Set up
 
 ```bash
 review-kit init .review --name "App" --title "UX review" --platforms mobile,desktop [--ignore-screenshots]
 ```
 
-`review-kit attach` does the same and also adds a review-kit pointer to the repo's `AGENTS.md` (and `CLAUDE.md` if present), so every agent working in the repo finds the skill. Use it when the setup should stay with the repo.
+`review-kit attach --kind ui` (or `--kind ui,backend`) creates `.review/<kind>/` for each kind and also adds a review-kit pointer to the repo's `AGENTS.md` (and `CLAUDE.md` if present), so every agent working in the repo finds the skill. Use it when the setup should stay with the repo.
 
 - Keep the review in `.review/` (or `docs/review/` if it should be visible in the repo). The built `site/` folder is always gitignored.
 - Screenshots are usually 50–300 KB each. Commit them if the review should travel with the repo. Pass `--ignore-screenshots` for long audits or public repos. Converting to JPEG keeps the files small: `sips -s format jpeg -s formatOptions 72 --resampleWidth 480 in.png --out out.jpg` on macOS, or `--max-width` at build time.
@@ -95,7 +99,7 @@ Agents working at the same time must not edit `review.json` concurrently. Each f
    }
    ```
 
-3. The orchestrator runs `review-kit apply-pending`. The files are merged in natural order (`fix2` before `fix10`) and each one is renamed to `*.applied.json`. Merge order decides the fix numbers, so start agents in the order you want them numbered, or set `"number"` explicitly. A file that fails validation stops the merge and stays in `pending/` so it can be fixed.
+3. The orchestrator runs `review-kit apply-pending`. The files are merged in natural order (`fix2` before `fix10`) and each one is renamed to `*.applied.json`. Merge order decides the fix numbers, so start agents in the order you want them numbered, or set `"number"` explicitly. A file that fails validation, including a wrongly shaped hand-off (for example `invalid hand-off: issues: expected a list`), stops the merge and stays in `pending/` so it can be fixed.
 
 ## 6. Build, serve, summarise, clean up
 
@@ -110,6 +114,23 @@ For a phone preview, explicitly enable network sharing with `--host 0.0.0.0`, th
 
 `--watch` rebuilds the site when `review.json` or `screenshots/` change. Browsers pick up changes on reload because `index.html` and `data.js` are served with `Cache-Control: no-cache` and every asset carries a content hash. Publish only the generated site folder after checking review text, screenshots and attachments for private information. If the builder finds unexpected files or symlinks in the output, use a fresh `--out` folder; it leaves the existing files untouched. Keep Playwright `--storage` session files outside published output and out of Git.
 
-When a round is finished, `review-kit clean` removes the built `site/` and the merged `pending/*.applied.json` files. `review-kit clean --orphans` also deletes screenshots that `review.json` no longer references, for example retakes or files from a fix you dropped. Add `--dry-run` to see the list first. `clean` only removes a site folder that review-kit built, and it never edits `review.json`.
+When a round is finished, `review-kit clean` removes the built `site/` and the merged `pending/*.applied.json` files. `review-kit clean --orphans` also deletes screenshots that `review.json` no longer references, for example retakes or files from a fix you dropped. Screenshots that unmerged `pending/*.json` files reference are kept. If a pending file can't be read, `--orphans` stops without deleting anything. Add `--dry-run` to see the list first. `clean` only removes a site folder that review-kit built, and it never edits `review.json`.
 
 [`examples/basic-app/run.sh`](../examples/basic-app/run.sh) runs every step of this guide on a small app.
+
+## Backend reviews
+
+A review with `project.kind: "backend"` covers code practices instead of screens. Set it up with `review-kit init .review/backend --kind backend`, or with `review-kit attach --kind backend`. The agent playbook is [`skill/review-kit/backend-review.md`](../skill/review-kit/backend-review.md). It has the checklist (security, correctness, errors, interface design, data, architecture, performance, tests, operability) and the severity table.
+
+- **Areas** are modules or layers. Give every issue `--where path:line`.
+- **Fixes** have no screenshot pairs. Put the proof in the summary: what was wrong, what changed, and a test that fails before and passes after, or a command with its output, in a fenced code block.
+
+```bash
+review-kit add-issue backend --area serve --severity P1 --where "app/serve.py:88" \
+  --title "Request body read without a size limit" --details "A 2 GB POST exhausts memory."
+review-kit add-fix backend --title "Cap request bodies at 10 MB" --files app/serve.py,tests/test_serve.py \
+  --summary $'**Proof.** `test_upload_limit` fails before, passes after:\n\n```\n$ python3 -m unittest tests.test_serve\nOK\n```' \
+  --resolves issue-1
+```
+
+Optional companion skills back each kind's checklist with rules to cite: ui-ux-pro-max for UI, and three wshobson/agents skills for backend. They ship with the kit: `review-kit companions` shows where they are, and `review-kit companions install` links them into `~/.claude/skills`.

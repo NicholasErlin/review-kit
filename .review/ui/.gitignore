@@ -1,0 +1,28 @@
+# review-kit build output
+site/
+# Local secrets and browser sessions
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+credentials
+credentials.json
+secrets.json
+state.json
+storage-state.json
+storageState.json
+auth.json
+cookies.json
+.auth/
+playwright/.auth/
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+.ssh/
+.aws/

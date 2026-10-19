@@ -2,14 +2,15 @@
 
 - the built site (only a folder that carries build.MARKER, so nothing else is ever deleted)
 - pending/*.applied.json hand-off files that apply-pending has already merged
-- with orphans=True, files under screenshots/ that review.json no longer references
+- with orphans=True, files under screenshots/ that neither review.json nor a waiting pending/*.json references
 """
 import os
 import re
 import shutil
 
-from . import model
+from . import edit, model
 from .build import MARKER
+from .model import ReviewError
 
 KEEP = {'.gitkeep'}
 
@@ -31,13 +32,30 @@ def _referenced(data, base):
     return refs
 
 
+def _pending_refs(base):
+    """Files that hand-offs waiting in pending/ point at: their screenshots are not orphans yet."""
+    pending = os.path.join(base, 'pending')
+    refs = set()
+    if not os.path.isdir(pending):
+        return refs
+    for n in sorted(os.listdir(pending)):
+        if n.endswith('.json') and not n.endswith('.applied.json'):
+            try:
+                env = edit.normalise_envelope(model.load(os.path.join(pending, n)))
+            except ReviewError as e:
+                raise ReviewError(f'{e}\n(--orphans needs every pending hand-off readable; fix or apply it first)')
+            fix = env.get('fix')
+            refs |= _referenced({'issues': env.get('issues') or [], 'fixes': [fix] if fix else []}, base)
+    return refs
+
+
 def orphans(review_path):
     """Files under screenshots/ that nothing in review.json references."""
     base = model.base_dir(review_path)
     shots = os.path.join(base, 'screenshots')
     if not os.path.isdir(shots):
         return []
-    refs = _referenced(model.load(review_path), base)
+    refs = _referenced(model.load(review_path), base) | _pending_refs(base)
     out = []
     for root, _, files in os.walk(shots):
         for n in sorted(files):

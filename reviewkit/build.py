@@ -35,8 +35,13 @@ class _Assets:
         if rel.startswith('..') or os.path.isabs(rel):
             raise ReviewError('asset must stay inside the review folder')
         rel = rel.replace(os.sep, '/')
-        rel = re.sub(r'[^A-Za-z0-9._/-]', '_', rel)
-        return f'{folder}/{rel}'
+        safe = re.sub(r'[^A-Za-z0-9._/-]', '_', rel)
+        dest = f'{folder}/{safe}'
+        if self.files.get(dest, abs_src) != abs_src:
+            # Another source sanitised to the same name ("a b.png" vs "a_b.png"): keep both apart.
+            stem, ext = os.path.splitext(safe)
+            dest = f'{folder}/{stem}-{hashlib.sha1(rel.encode("utf-8")).hexdigest()[:8]}{ext}'
+        return dest
 
     def image(self, img, fmt):
         src = model.image_src(img)
@@ -225,8 +230,7 @@ def build(review_path, out, max_width=None, force=False, check_files=True, quiet
     site = compile_data(data, base, assets)
     assets.write()
     payload = 'window.REVIEW = ' + json.dumps(site, ensure_ascii=False, separators=(',', ':')) + ';\n'
-    with open(os.path.join(out, 'data.js'), 'w', encoding='utf-8') as f:
-        f.write(payload)
+    model.write_text(os.path.join(out, 'data.js'), payload)  # atomic: `serve --watch` may be reading it
     ver_src = payload
     for name in ('index.html', 'app.css', 'app.js'):
         with open(os.path.join(model.SITE_SRC, name), encoding='utf-8') as f:
@@ -241,8 +245,7 @@ def build(review_path, out, max_width=None, force=False, check_files=True, quiet
         if name == 'index.html':
             import html as _html
             s = s.replace('__TITLE__', _html.escape(title)).replace('__ACCENT__', proj['theme']['accent'])
-        with open(os.path.join(out, name), 'w', encoding='utf-8') as f:
-            f.write(s)
+        model.write_text(os.path.join(out, name), s)
     model.save(os.path.join(out, MARKER), {'version': 1,
                'files': ['index.html', 'app.css', 'app.js', 'data.js'] + sorted(assets.files)})
     counted = [i for i in site['issues'] if i['counted']]

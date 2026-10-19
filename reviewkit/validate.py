@@ -20,6 +20,16 @@ _TYPES = {
 }
 
 
+def _ecma_pattern(p):
+    """JSON Schema patterns are ECMA-262: an unescaped trailing $ is the very end, but Python's $ also matches
+    before a final newline, so translate it to \\Z."""
+    if p.endswith('$'):
+        backslashes = len(p[:-1]) - len(p[:-1].rstrip('\\'))
+        if backslashes % 2 == 0:  # an escaped \$ is a literal dollar sign
+            return p[:-1] + r'\Z'
+    return p
+
+
 def _path(p):
     return p or '(root)'
 
@@ -58,7 +68,7 @@ class SchemaValidator:
                 out.append(f'{_path(path)}: must not be empty' if s['minLength'] == 1 else f'{_path(path)}: shorter than {s["minLength"]}')
             if 'maxLength' in s and len(v) > s['maxLength']:
                 out.append(f'{_path(path)}: longer than {s["maxLength"]} characters')
-            if 'pattern' in s and not re.search(s['pattern'], v):
+            if 'pattern' in s and not re.search(_ecma_pattern(s['pattern']), v):
                 out.append(f'{_path(path)}: {v!r} does not match {s["pattern"]}')
         if _TYPES['number'](v) and 'minimum' in s and v < s['minimum']:
             out.append(f'{_path(path)}: must be >= {s["minimum"]}')

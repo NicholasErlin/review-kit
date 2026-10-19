@@ -76,6 +76,7 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "title": { "type": "string", "description": "Shown after the name in the header, e.g. \"UI/UX audit\". Default \"Review\"." },
+        "kind": { "enum": ["ui", "backend"], "default": "ui", "description": "What is reviewed: ui (UI/UX, with before/after screenshots) or backend (code practices; evidence is code, tests and output). Agents pick their review playbook and companion skills from it." },
         "description": { "$ref": "#/$defs/rich" },
         "date": { "type": "string", "description": "Review date, ISO 8601 preferred." },
         "repo": { "type": "string", "description": "Repository URL or path." },

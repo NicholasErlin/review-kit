@@ -87,7 +87,10 @@ def _resize(tool, src, dst, max_width):
 def publish(src, dst, max_width=None, tool=None):
     """Copy src to dst (downscaled to max_width when possible). Skips unchanged files.
     Returns 'copied', 'resized' or 'kept'."""
-    if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+    # Copies carry the source's mtime (copy2, and utime after resizing), so "unchanged" means the exact same mtime.
+    # A newer *or older* source (a replaced capture, a restored file) is published again.
+    src_ns = os.stat(src).st_mtime_ns
+    if os.path.isfile(dst) and os.stat(dst).st_mtime_ns == src_ns:
         return 'kept'
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if max_width and tool and os.path.splitext(src)[1].lower() in ('.png', '.jpg', '.jpeg'):
@@ -95,6 +98,7 @@ def publish(src, dst, max_width=None, tool=None):
         if dim and dim[0] > max_width:
             tmp = dst + '.tmp' + os.path.splitext(dst)[1]
             if _resize(tool, src, tmp, max_width):
+                os.utime(tmp, ns=(src_ns, src_ns))
                 os.replace(tmp, dst)
                 return 'resized'
             if os.path.exists(tmp):

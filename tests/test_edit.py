@@ -168,6 +168,83 @@ class EditTest(TempDirTest):
         self.assertIn('- #1 Fix A', out)
         self.assertIn('- P2 b [Desktop]: B', out)
 
+    # -- regression: imported screenshots with the same file name (backend review issue-1)
+    def test_same_basename_screenshots_do_not_overwrite_each_other(self):
+        a, b = self.png('a/home.png', 4, 8), self.png('b/home.png', 6, 8)
+        code, _, err = run('add-fix', self.review, '--title', 'T', '--pair', 'mobile', a, b)
+        self.assertEqual(code, 0, err)
+        for shot in (a, b):
+            self.assertEqual(run('add-issue', self.review, '--title', 'I', '--platform', 'mobile', '--screenshot', shot)[0], 0)
+        data = self.data()
+        pair = data['fixes'][0]['platforms']['mobile']['pairs'][0]
+        stored = [pair['before'], pair['after']] + [i['screenshots'][0] for i in data['issues']]
+        self.assertEqual(len(set(stored)), 4, stored)
+        for rel, orig in zip(stored, (a, b, a, b)):
+            self.assertEqual(read_bytes(os.path.join(self.dir, rel)), read_bytes(orig), rel)
+
+    def test_reimporting_an_identical_screenshot_reuses_the_copy(self):
+        a = self.png('a/home.png')
+        for _ in range(2):
+            run('add-issue', self.review, '--title', 'I', '--platform', 'mobile', '--screenshot', a)
+        self.assertEqual([i['screenshots'] for i in self.data()['issues']], [['screenshots/issues/home.png']] * 2)
+
+    # -- regression: malformed input and OS errors are clean CLI errors (issue-3)
+    def test_malformed_pending_envelope_is_a_clean_error(self):
+        pending = os.path.join(self.dir, 'pending')
+        for n, body in (('fix1.json', {'issues': 'x'}), ('fix2.json', {'fix': [1]}), ('fix3.json', {'marks': [1]})):
+            with open(os.path.join(pending, n), 'w') as f:
+                json.dump(body, f)
+            code, _, err = run('apply-pending', self.review)
+            self.assertEqual(code, 1, n)
+            self.assertNotIn('Traceback', err)
+            self.assertIn('review-kit:', err)
+            os.remove(os.path.join(pending, n))
+
+    def test_broken_review_json_is_reported_before_editing(self):
+        data = self.data()
+        data['issues'] = [{'title': 'no id'}]
+        with open(self.review, 'w') as f:
+            json.dump(data, f)
+        for argv in (('add-issue', self.review, '--title', 'x'), ('add-fix', self.review, '--title', 'x'),
+                     ('mark', '-r', self.review, 'fixed', 'a'), ('summary', self.review)):
+            code, _, err = run(*argv)
+            self.assertEqual(code, 1, argv)
+            self.assertIn('run `review-kit validate`', err)
+
+    def test_unknown_companion_kind_is_a_clean_error(self):
+        code, _, err = run('companions', '--kind', 'foo')
+        self.assertEqual(code, 1)
+        self.assertIn('unknown review kind', err)
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0, 'root ignores permissions')
+    def test_os_errors_are_clean_errors(self):
+        os.chmod(self.dir, 0o555)
+        try:
+            code, _, err = run('add-issue', self.review, '--title', 'x', '--platform', 'mobile')
+        finally:
+            os.chmod(self.dir, 0o755)
+        self.assertEqual(code, 1)
+        self.assertIn('review-kit:', err)
+        self.assertIn('ermission denied', err)
+
+    # -- regression: mark takes the review positionally like every other command (issue-12)
+    def test_mark_accepts_review_positionally_and_with_r(self):
+        run('add-issue', self.review, '--json', json.dumps([{'id': 'a', 'title': 'A', 'platform': 'mobile'},
+                                                             {'id': 'b', 'title': 'B', 'platform': 'mobile'}]))
+        code, out, err = run('mark', self.dir, 'fixed', 'a')
+        self.assertEqual(code, 0, err)
+        code, out, err = run('mark', '-r', self.review, 'wontfix', 'b')
+        self.assertEqual(code, 0, err)
+        self.assertEqual([i['status'] for i in self.data()['issues']], ['fixed', 'wontfix'])
+        code, _, err = run('mark', self.dir, 'fixed')
+        self.assertEqual(code, 1)
+        self.assertIn('ids', err)
+
+
+def read_bytes(path):
+    with open(path, 'rb') as f:
+        return f.read()
+
 
 if __name__ == '__main__':
     unittest.main()

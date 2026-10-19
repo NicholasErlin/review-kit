@@ -60,6 +60,19 @@ class SchemaTest(unittest.TestCase):
         self.assertTrue(any('theme.accent' in e for e in schema_errors(d)))
 
 
+    def test_anchored_patterns_reject_a_trailing_newline(self):
+        # regression: backend review issue-6 (Python's $ also matches before a final newline)
+        d = minimal()
+        d['project']['theme'] = {'accent': '#fff\n'}
+        d['issues'] = [{'id': 'abc\n', 'title': 'x'}]
+        errs = schema_errors(d)
+        self.assertTrue(any('theme.accent' in e for e in errs), errs)
+        self.assertTrue(any('issues[0].id' in e for e in errs), errs)
+        d['project']['theme'] = {'accent': '#fff'}
+        d['issues'][0]['id'] = 'abc'
+        self.assertEqual(schema_errors(d), [])
+
+
 class SemanticTest(unittest.TestCase):
     def test_cross_references(self):
         d = load_demo()

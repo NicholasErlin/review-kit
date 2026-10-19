@@ -1,0 +1,611 @@
+{
+  "$schema": "https://raw.githubusercontent.com/NicholasErlin/review-kit/main/schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "review-kit",
+    "title": "UI/UX review",
+    "date": "2026-10-19",
+    "links": [],
+    "kind": "ui",
+    "theme": {
+      "accent": "#2f5d50"
+    }
+  },
+  "platforms": [
+    {
+      "id": "mobile",
+      "label": "Mobile",
+      "shape": "portrait"
+    },
+    {
+      "id": "desktop",
+      "label": "Desktop",
+      "shape": "auto"
+    }
+  ],
+  "severities": [
+    {
+      "id": "P0",
+      "label": "P0",
+      "color": "#c62828",
+      "description": "Critical: broken flow, data loss or blocker"
+    },
+    {
+      "id": "P1",
+      "label": "P1",
+      "color": "#b45f00",
+      "description": "Major: clearly wrong or painful, has a workaround"
+    },
+    {
+      "id": "P2",
+      "label": "P2",
+      "color": "#2f7d5b",
+      "description": "Minor: polish and consistency"
+    }
+  ],
+  "areas": [],
+  "issues": [
+    {
+      "id": "d-1",
+      "platform": "desktop",
+      "area": "global",
+      "severity": "P1",
+      "title": "Keyboard focus ring is invisible on header links",
+      "details": "The global `:focus-visible` outline uses `var(--brand)`, and for dark accents `--brand` equals `--accent`, the header background. Tabbing through brand, Overview, Fixes, Issues and Plan shows no ring at all (outline #5b3df5 on #5b3df5, 1:1). The screenshot has focus on **Fixes**; nothing marks it. Checked with Playwright Tab presses and computed styles.\n\nRule (ui-ux-pro-max, ux, Focus States, High): use a visible focus ring on every interactive control; don't remove focus outline without replacement. Rule (ux, Focus Appearance): indicator with 3:1 state contrast.\n\nSuggested fix: `.top :focus-visible { outline-color: var(--on-accent); }` (app.css).",
+      "where": "reviewkit/site/app.css:33",
+      "top": true,
+      "screenshots": [
+        "screenshots/issues/header-focus-desktop.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-1",
+      "platform": "mobile",
+      "area": "global",
+      "severity": "P1",
+      "title": "White text on the default P1 orange tag is 3.0:1",
+      "details": "Severity tags are 11px bold. The text colour flips to dark only when the tag colour's luminance is above 0.5 (`var dark = lum(hex(s.color)) > 0.5`). The default P1 colour #e07b00 (from `rk init`) has luminance ~0.31, so it gets white text at **3.0:1**. Severity is the main signal on every view (Overview rows, Issues, Plan, issue chips). P0 (5.6:1) and P2 (5.0:1) pass.\n\nRule (ui-ux-pro-max, ux, Color Contrast, High): minimum 4.5:1 for normal text.\n\nSuggested fix: pick the text colour with the better contrast ratio (white vs #13232a) instead of a fixed luminance threshold; same for `.chip.on` in the severity filter.",
+      "where": "reviewkit/site/app.js:60",
+      "top": true,
+      "screenshots": [
+        "screenshots/issues/overview-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-2",
+      "platform": "mobile",
+      "area": "global",
+      "severity": "P1",
+      "title": "Status text colours are below 4.5:1 (Partly fixed 3.3:1, Not a bug 4.4:1, Won't fix 4.2:1)",
+      "details": "Status pills (`.st`, 11px bold), the Partly fixed stat number and legend use `--partial` #b7860b: **3.27:1** on white cards and 3.0:1 on the `--bg` stat tiles. `--notabug` #4f7ca8 is 4.39:1, `--wontfix` #7b7b7b 4.23:1, and white on the unranked tag #6f7f83 4.17:1. Dark mode values pass (e.g. partial 8.2:1). Measured from the CSS variables.\n\nRule (ui-ux-pro-max, ux, Color Contrast, High): minimum 4.5:1 for normal text.\n\nSuggested fix: darken the light-theme values in `:root` (e.g. partial ~#8a6408, notabug ~#3f6a96, wontfix ~#666); the filter chip already hard-codes a darker #a67a0a for partial.",
+      "where": "reviewkit/site/app.css:73",
+      "screenshots": [
+        "screenshots/issues/overview-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-3",
+      "platform": "mobile",
+      "area": "global",
+      "severity": "P1",
+      "title": "Many tap targets on phones are 15-36px tall",
+      "details": "Measured at 412x915 (Playwright bounding boxes):\n- Fixes: Slider / Tap / Side by side 32px (`.seg.sm`), platform segment 36px, issue chips 25px (`.ichip`), *What changed* summary 32px.\n- Issues: all filter chips 36px (`.chip`), *Reset filters* 31px (`.linkbtn`).\n- Overview: issue titles in *What's left* / top issues are 22px-tall links (`.list a.row` wraps only the title), `4 issues` / `repository` text links 15px.\n- Plan: linked issue/fix chips 25px.\n\nRule (ui-ux-pro-max, ux, Touch Target Size, High): 44pt iOS / 48dp Android on touch; WCAG 2.2 Target Size (Minimum) 24px as the floor. Most pass 24px but all miss 44px; the 15px links miss both.\n\nSuggested fix: under `(max-width: 819px)` raise `.seg button`, `.chip`, `.linkbtn`, `.fix-log summary` to min-height 44px, pad `.ichip` vertically, and make the whole `.toprow` the link.",
+      "where": "reviewkit/site/app.css:114",
+      "screenshots": [
+        "screenshots/issues/issues-filters-mobile.png",
+        "screenshots/issues/fixes-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "d-2",
+      "platform": "desktop",
+      "area": "global",
+      "severity": "P1",
+      "title": "Screenshot viewer does not keep keyboard focus inside the dialog",
+      "details": "The lightbox is `role=dialog aria-modal=true` and focuses Close on open, but there's no focus containment. With one image (prev/next hidden), the first Tab leaves the dialog and walks the page hidden behind it (brand, Overview, Fixes, Issues...) while the viewer still covers the screen. Verified with Playwright: the Tab sequence after opening is body, header brand, Overview, Fixes, Issues, all outside `#lightbox`. The screenshot shows the viewer after two Tabs with no focused control visible.\n\nRule (ui-ux-pro-max, ux, Keyboard Navigation): complete keyboard navigation with visible focus on every operable control; tab order aligned with what is visible. (No exact focus-trap rule in the database; this follows the WAI-ARIA modal dialog pattern.)\n\nSuggested fix: in the existing `keydown` handler (app.js:571) wrap Tab / Shift+Tab between the visible lightbox buttons.",
+      "where": "reviewkit/site/app.js:555",
+      "screenshots": [
+        "screenshots/issues/lightbox-tab-desktop.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "d-3",
+      "platform": "desktop",
+      "area": "global",
+      "severity": "P2",
+      "title": "Changing view drops focus to the page start and there is no skip link",
+      "details": "`renderTabs()` rebuilds both nav bars with innerHTML, so the link you activated is destroyed and focus falls back to `body`. After pressing Enter on *Issues*, the next Tab goes to the brand link again and the new view isn't announced. There's also no *Skip to content* link, so every view change costs 5+ Tabs before the content. Verified with Playwright (activeElement is BODY after the route change).\n\nRules (ui-ux-pro-max, ux): Skip Links - provide skip to main content link; Keyboard Navigation - test every action without a pointer.\n\nSuggested fix: after `route()` renders, move focus to the view's `h1` (tabindex=-1), and add a visually hidden skip link before the header.",
+      "where": "reviewkit/site/app.js:83",
+      "status": "fixed"
+    },
+    {
+      "id": "m-4",
+      "platform": "mobile",
+      "area": "overview",
+      "severity": "P2",
+      "title": "Progress rows use the cryptic notation '1 + 1◐ / 3'",
+      "details": "Per-severity counts render as `resolved + partial◐ / total`, e.g. `1 + 1◐ / 3` and `0 + 1◐ / 1`. The half-circle glyph isn't in the legend, and screen readers read it as a symbol name. The bar's aria-label also omits the not-a-bug / won't-fix counts that the bar draws.\n\nRule (ui-ux-pro-max, ux, Screen Reader): content should make sense when read aloud.\n\nSuggested fix: '1 resolved, 1 partly of 3' or visually hidden text; include notabug/wontfix in the bar label.",
+      "where": "reviewkit/site/app.js:110",
+      "screenshots": [
+        "screenshots/issues/overview-allissues-desktop.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-5",
+      "platform": "mobile",
+      "area": "global",
+      "severity": "P2",
+      "title": "The Open part of progress bars is almost invisible (1.16:1)",
+      "details": "Open work is shown as the bar's empty track (`--chip` #e8eff0 on a white card, **1.16:1**; dark mode #20302f on #162225, 1.18:1), and the legend swatch for Open is the same near-invisible colour. Open is the number a reader most needs, yet it's the one segment that reads as empty.\n\nRule (ui-ux-pro-max, ux, Color Only): don't convey information by colour alone. Non-text UI parts need 3:1 (playbook).\n\nSuggested fix: give the track a visible border or darker tone, and outline the Open legend swatch.",
+      "where": "reviewkit/site/app.css:87",
+      "screenshots": [
+        "screenshots/issues/overview-allissues-desktop.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "d-4",
+      "platform": "desktop",
+      "area": "fixes",
+      "severity": "P2",
+      "title": "Fix cards open on a platform with no before/after while showing compare controls",
+      "details": "Fix 2 (Notes table columns) is a desktop fix, but the card defaults to the stored or first platform (Mobile), which only has a reference image. The Slider / Tap / Side by side control is still shown because `hasFullPair` checks all platforms, so it does nothing for the visible content. The reader has to discover the Desktop tab to see the actual fix.\n\nRule (ui-ux-pro-max, ux, Disabled States): clearly indicate non-interactive elements.\n\nSuggested fix: when the preferred platform has no pairs, default to one that has; hide the mode control when the current platform has no full pair.",
+      "where": "reviewkit/site/app.js:240",
+      "screenshots": [
+        "screenshots/issues/fixes-desktop.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-6",
+      "platform": "mobile",
+      "area": "fixes",
+      "severity": "P2",
+      "title": "Issue chips truncate titles, with the full title only in a hover tooltip",
+      "details": "In *Addresses* and Plan links, `.ichip span.t` is capped at 240px with an ellipsis ('Date and title columns overlap in the not…', 'Save is hidden behind the bottom navig…'). The full title is only in `title=`, which touch users can't reach; they must open the issue.\n\nRules (ui-ux-pro-max, ux): Essential Text Truncation - distinguishing names need complete access (wrap or provide a visible full-detail path); Hover vs Tap - don't rely only on hover.\n\nSuggested fix: let the chip text wrap to two lines on narrow screens.",
+      "where": "reviewkit/site/app.css:130",
+      "screenshots": [
+        "screenshots/issues/fixes-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "d-5",
+      "platform": "desktop",
+      "area": "fixes",
+      "severity": "P2",
+      "title": "Compare widget keeps role=slider in Tap mode",
+      "details": "In Tap (flip) mode the `.cmp` element still has `role=slider`, `aria-valuenow=50` and the label 'Before / after comparison', but Space/Enter toggles between two images and arrows do nothing. Screen readers announce a slider at 50% that can't be moved, and the before/after state change isn't announced. Checked the DOM via Playwright after switching to Tap.\n\nRule (ui-ux-pro-max, ux, Screen Reader): use semantic HTML and ARIA properly.\n\nSuggested fix: in flip mode render `role=button` with `aria-pressed` and a label that says which image is showing.",
+      "where": "reviewkit/site/app.js:208",
+      "status": "fixed"
+    },
+    {
+      "id": "m-7",
+      "platform": "mobile",
+      "area": "issues",
+      "severity": "P2",
+      "title": "Filter group headings are labels not tied to their chip groups",
+      "details": "PLATFORM / SEVERITY / STATUS / SOURCE are `<label class=k>` elements with no `for` and no control, and the chip rows have no `role=group` / `aria-labelledby`. A screen reader hears 'P1, toggle button, not pressed' with no Severity context; 'Open' could be a status or an action. The `.seg` groups in Fixes are role=group with no label either.\n\nRule (ui-ux-pro-max, ux, Form Labels): controls need programmatic labels.\n\nSuggested fix: `<div class=frow role=group aria-labelledby=...>` with the heading as a span with an id.",
+      "where": "reviewkit/site/app.js:358",
+      "screenshots": [
+        "screenshots/issues/issues-filters-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "m-8",
+      "platform": "mobile",
+      "area": "plan",
+      "severity": "P2",
+      "title": "Plan progress bar has no legend, and its text leaves out dropped items",
+      "details": "Roadmap says '1 of 5 done' above a bar with green, grey and orange segments. Nothing explains grey (dropped) or orange (in progress / partly done), unlike the Overview bars, which have a legend. The Overview plan card text likewise leaves out the dropped item that its bar draws.\n\nRule (ui-ux-pro-max, ux, Color Only): use icons/text in addition to colour.\n\nSuggested fix: reuse the `.legend` row, or extend the text to '1 done, 2 in progress, 1 dropped of 5'.",
+      "where": "reviewkit/site/app.js:506",
+      "screenshots": [
+        "screenshots/issues/plan-mobile.png"
+      ],
+      "status": "fixed"
+    },
+    {
+      "id": "d-6",
+      "platform": "desktop",
+      "area": "global",
+      "severity": "P2",
+      "title": "Animations ignore prefers-reduced-motion",
+      "details": "The flip cross-fade (.18s), chevron rotation (.15s) and `scrollIntoView` on fix deep links run regardless of `prefers-reduced-motion`; app.css has no media query for it. The motion is small, so impact is low.\n\nRule (ui-ux-pro-max, ux, Reduced Motion, High): check the prefers-reduced-motion media query.\n\nSuggested fix: `@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }`.",
+      "where": "reviewkit/site/app.css:137",
+      "status": "fixed"
+    },
+    {
+      "id": "d-7",
+      "platform": "desktop",
+      "area": "fixes",
+      "severity": "P2",
+      "title": "Side-by-side and single screenshots can't be opened full size with the keyboard",
+      "details": "Found while verifying fix4. In *Side by side* mode and for single images, the screenshot is a plain `<img data-lb>` with a click handler, not a button or link. Keyboard users can't focus it or open the viewer, and after Esc focus returns to `body` because the opener isn't focusable. The slider and Tap modes are fine, since their zoom button is a real button. Checked with Playwright: after Esc, activeElement is BODY.\n\nRule (ui-ux-pro-max, ux, Keyboard Navigation): complete keyboard navigation with visible focus on every operable control.\n\nSuggested fix: wrap the image in `<button type=button class=shot aria-label='View full size'>` or give it tabindex=0, role=button and an Enter/Space handler.",
+      "where": "reviewkit/site/app.js:220",
+      "status": "open"
+    },
+    {
+      "id": "d-8",
+      "platform": "desktop",
+      "area": "global",
+      "severity": "P2",
+      "title": "Keyboard focus can land under the sticky header",
+      "details": "Found while running the smoke test after fix6. Nothing offsets scrolling for the sticky header, so when Shift+Tab (or a scripted click) brings a control into view at the top edge, it sits under the header. In the screenshot, focus is on *Side by side* of fix 1, which is completely hidden. Fix deep links worked around it with `window.scrollBy(0, -64)`.\n\nRule (ui-ux-pro-max, ux, Focus Not Obscured (Minimum)): WCAG 2.2 AA requires keyboard focus to stay at least partly visible; offset sticky UI with scroll-padding.",
+      "where": "reviewkit/site/app.css:28",
+      "screenshots": [
+        "screenshots/fix7/shift-tab-desktop-before.png"
+      ],
+      "status": "fixed"
+    }
+  ],
+  "fixes": [
+    {
+      "id": "fix1",
+      "title": "Visible keyboard focus ring in the header",
+      "summary": "The global `:focus-visible` outline is `var(--brand)`, which equals the header background for dark accents, so focused header links had no visible ring. Added `.top :focus-visible { outline-color: var(--on-accent); }` so header focus uses the same colour as the header text (white on dark accents, dark ink on light ones).\n\nChecked by tabbing with Playwright: desktop shot has focus on **Fixes**, mobile shot on the brand link; both now show a white ring (about 7:1 on #5b3df5).",
+      "files": [
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix1/header-focus-desktop-before.png",
+              "after": "screenshots/fix1/header-focus-desktop-after.png"
+            }
+          ]
+        },
+        "mobile": {
+          "pairs": [
+            {
+              "before": "screenshots/fix1/header-focus-mobile-before.png",
+              "after": "screenshots/fix1/header-focus-mobile-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "d-1"
+      ],
+      "number": 1,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix2",
+      "title": "Contrast-safe severity tags, status colours and progress bars",
+      "summary": "- **Severity tags (m-1):** the theme code now picks dark ink (#13232a) or white by whichever has the higher contrast ratio against the severity colour, instead of a luminance > 0.5 threshold. The default P1 orange #e07b00 now gets dark text at 5.5:1 (was white at 3.0:1); P0 and P2 keep white text (5.6:1, 5.0:1). The same choice drives the active severity filter chips.\n- **Status colours (m-2):** light-theme `--partial` #b7860b to #8a6408 (5.4:1 on cards, 5.0:1 on stat tiles), `--notabug` #4f7ca8 to #3f6a96 (5.7:1), `--wontfix` #7b7b7b to #666 (5.7:1), and the unranked tag #6f7f83 to #5f6f73 (white text 5.2:1). The active status filter chips use the same values. Dark-mode values were already fine and are unchanged.\n- **Open segment (m-5):** progress bars get a 1px inset outline in `--open` (light value #8a989c to #7d8b8f, 3.5:1 on white, 4.6:1 on the dark card), so the open, empty part of a bar is visible. The Open legend swatch gets the same outline.\n\nRatios were computed from the hex values with the WCAG formula.",
+      "files": [
+        "reviewkit/site/app.js",
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "mobile": {
+          "pairs": [
+            {
+              "before": "screenshots/fix2/overview-mobile-before.png",
+              "after": "screenshots/fix2/overview-mobile-after.png"
+            }
+          ]
+        },
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix2/overview-card-desktop-before.png",
+              "after": "screenshots/fix2/overview-card-desktop-after.png"
+            },
+            {
+              "before": "screenshots/fix2/issues-desktop-before.png",
+              "after": "screenshots/fix2/issues-desktop-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "m-1",
+        "m-2",
+        "m-5"
+      ],
+      "number": 2,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix3",
+      "title": "44px touch targets on phones and full titles in issue chips",
+      "summary": "Phone-only (`max-width: 819px`) block in app.css:\n- Segment buttons (platform and Slider / Tap / Side by side), filter chips, *Reset filters*, the *What changed* summary, the area select, and the compare zoom button are at least 44px tall (were 31-40px).\n- Issue chips in *Addresses* and Plan are 44px tall and **wrap the full title** instead of cutting it at 240px with an ellipsis (m-6). Desktop keeps the one-line chip with its tooltip.\n- Inline text links in card subtitles (`4 issues`, `repository`) and in the fix log get 14px of invisible vertical padding, so the tap area is about 43px without moving the text.\n- On all widths, the whole Overview issue row (*What's left*, top issues) is now the link via an `a.row::after` overlay, not just the 22px title line. There's no visual change, so it has no screenshot pair.\n\nChecked by measuring every visible link, button, summary and select in `#app` with Playwright at 412x915 on Overview, Fixes, Issues (filters open, one issue expanded) and Plan: none is under 44px tall now (before: 30 controls were 15-42px).",
+      "files": [
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "mobile": {
+          "pairs": [
+            {
+              "before": "screenshots/fix3/issues-filters-mobile-before.png",
+              "after": "screenshots/fix3/issues-filters-mobile-after.png"
+            },
+            {
+              "before": "screenshots/fix3/fixes-mobile-before.png",
+              "after": "screenshots/fix3/fixes-mobile-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "m-3",
+        "m-6"
+      ],
+      "number": 3,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix4",
+      "title": "Keyboard focus stays in the screenshot viewer and follows view changes; skip link",
+      "summary": "- **Viewer (d-2):** the lightbox `keydown` handler now wraps Tab / Shift+Tab between the visible buttons in `#lightbox` (Close, Previous, Next, caption links), so focus can't reach the page hidden behind the modal.\n- **View changes (d-3):** after a hash route change, focus moves to the new view's `h1` (`tabindex=-1`, `preventScroll`), so the next Tab goes into the content instead of starting again at the header.\n- **Skip link (d-3):** a *Skip to content* link is now the first focusable element. It's hidden until focused and uses a click handler, so it doesn't change the hash route.\n\nChecked with Playwright on desktop:\n- Opening a two-image pair and tabbing gives Previous, Next, Close, Previous (Shift+Tab: Close), all inside the dialog. Before, focus left it on the first Tab.\n- Enter on the *Issues* tab, then Tab, now focuses the search field. Before, it went back to the header (the shots show where focus is after that Tab).\n- Tab then Enter on a fresh page focuses the Plan `h1`, and the hash stays `#/plan`.",
+      "files": [
+        "reviewkit/site/app.js",
+        "reviewkit/site/index.html",
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix4/lightbox-tab-desktop-before.png",
+              "after": "screenshots/fix4/lightbox-tab-desktop-after.png"
+            },
+            {
+              "before": "screenshots/fix4/route-tab-desktop-before.png",
+              "after": "screenshots/fix4/route-tab-desktop-after.png"
+            },
+            {
+              "after": "screenshots/fix4/skip-link-desktop-after.png"
+            }
+          ]
+        },
+        "mobile": {
+          "pairs": [
+            {
+              "after": "screenshots/fix4/skip-link-mobile-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "d-2",
+        "d-3"
+      ],
+      "number": 4,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix5",
+      "title": "Plain progress counts, plan legends and correct ARIA for Tap mode and filter groups",
+      "summary": "- **Counts (m-4):** severity rows read `1 / 3 · 1 partly` instead of `1 + 1◐ / 3`; the resolved count has a tooltip ('1 of 3 resolved'). The bars' accessible label now lists every non-zero segment, e.g. '2 fixed, 1 not a bug, 1 won't fix, 1 partly fixed, 3 open'; it used to leave out not-a-bug and won't-fix.\n- **Plan (m-8):** the plan groups and the Overview plan card share `planCounts` / `planSummary` / `planLegend`. Text: '1 of 5 done · 2 in progress or partly done · 1 dropped · 1 to do'. A legend (Done, In progress / partly done, Dropped, To do) sits under the bar, and the to-do part of the bar is counted as open, so its label is right.\n- **Tap mode (d-5):** in flip mode the compare box is `role=button` with the label 'Showing after. Press to show before.', updated on every toggle. Slider mode keeps `role=slider` with aria-valuenow.\n- **Groups (m-7):** filter rows are `role=group` with `aria-labelledby` pointing at their heading (Platform, Severity, Status, Source), and the headings are spans rather than orphan `<label>`s. The `.seg` groups get `aria-label` 'Platform' / 'Comparison view'.\n\nChecked the DOM with Playwright: in flip mode the role is button and the label switches to 'Showing before…' after Space; slider mode is unchanged; the issue filter groups resolve to Platform, Severity, Status.",
+      "files": [
+        "reviewkit/site/app.js",
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix5/overview-card-desktop-before.png",
+              "after": "screenshots/fix5/overview-card-desktop-after.png"
+            },
+            {
+              "before": "screenshots/fix5/plan-desktop-before.png",
+              "after": "screenshots/fix5/plan-desktop-after.png"
+            }
+          ]
+        },
+        "mobile": {
+          "pairs": [
+            {
+              "before": "screenshots/fix5/plan-mobile-before.png",
+              "after": "screenshots/fix5/plan-mobile-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "m-4",
+        "m-8",
+        "d-5",
+        "m-7"
+      ],
+      "number": 5,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix6",
+      "title": "Fix cards open where the before/after is; reduced motion respected",
+      "summary": "- **Default platform (d-4):** a fix card opens on the preferred (last chosen, else first) platform only if that platform has a before/after pair. Otherwise it opens on the first platform that has one. Fix 2 of the demo now opens on Desktop with its pair instead of on Mobile's reference-only image.\n- **Mode control (d-4):** Slider / Tap / Side by side is hidden (`hidden` plus `.seg[hidden]`) while the selected platform has no full pair, and comes back when you switch to one that does.\n- **Reduced motion (d-6):** under `prefers-reduced-motion: reduce`, CSS transitions and animations are switched off (flip cross-fade, chevron rotation). The fix deep-link scroll was already instant (`scrollIntoView` without smooth behaviour), so it needed no change.\n\nChecked with Playwright (reducedMotion: reduce): the mode control is visible on Desktop, hidden after choosing Mobile, and visible again on Desktop; the chevron's transition-duration is 0s.",
+      "files": [
+        "reviewkit/site/app.js",
+        "reviewkit/site/app.css"
+      ],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix6/fixes-desktop-before.png",
+              "after": "screenshots/fix6/fixes-desktop-after.png"
+            }
+          ]
+        },
+        "mobile": {
+          "pairs": [
+            {
+              "before": "screenshots/fix6/fixes-mobile-before.png",
+              "after": "screenshots/fix6/fixes-mobile-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "d-4",
+        "d-6"
+      ],
+      "number": 6,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "fix7",
+      "title": "Focused and scrolled-to content stays below the sticky header",
+      "summary": "Added `html { scroll-padding-top: calc(72px + env(safe-area-inset-top)); }`, so browser focus scrolling and `scrollIntoView` leave room for the sticky header. Removed the `scrollBy(0, -64)` hack after the fix deep-link `scrollIntoView`, since scroll-padding does that now. A deep link to `#/fixes/fix-1` still lands with the card just under the header; that was checked visually, and with no visible change it has no screenshot pair.\n\nThis also fixes the smoke test's desktop 'tap toggles to before' check. After fix6, fix 2 opens on its taller desktop pair, which put fix 1's mode buttons under the header; Playwright's click retry then scrolled the page to the top and clicked outside the viewport. The smoke test itself was not changed.\n\nChecked: Shift+Tab from fix 1's first issue chip now shows the focused *Side by side* button below the header (the before shot has it hidden).",
+      "files": [
+        "reviewkit/site/app.css",
+        "reviewkit/site/app.js"
+      ],
+      "platforms": {
+        "desktop": {
+          "pairs": [
+            {
+              "before": "screenshots/fix7/shift-tab-desktop-before.png",
+              "after": "screenshots/fix7/shift-tab-desktop-after.png"
+            }
+          ]
+        }
+      },
+      "issues": [
+        "d-8"
+      ],
+      "number": 7,
+      "date": "2026-10-19"
+    }
+  ],
+  "plan": [
+    {
+      "id": "ui-fixes-awaiting-go-ahead",
+      "title": "UI fixes (awaiting go-ahead)",
+      "items": [
+        {
+          "id": "p-1",
+          "phase": "Accessibility",
+          "severity": "P1",
+          "title": "Visible focus ring in the header",
+          "files": "reviewkit/site/app.css",
+          "effort": "S",
+          "status": "done",
+          "issues": [
+            "d-1"
+          ],
+          "fixes": [
+            "fix1"
+          ]
+        },
+        {
+          "id": "p-2",
+          "phase": "Accessibility",
+          "severity": "P1",
+          "title": "Contrast-safe tag and status colours (pick tag text by contrast ratio; darken light-theme status colours)",
+          "files": [
+            "reviewkit/site/app.js",
+            "reviewkit/site/app.css"
+          ],
+          "effort": "S",
+          "status": "done",
+          "issues": [
+            "m-1",
+            "m-2",
+            "m-5"
+          ],
+          "fixes": [
+            "fix2"
+          ]
+        },
+        {
+          "id": "p-3",
+          "phase": "Touch",
+          "severity": "P1",
+          "title": "44px touch targets on phones for segments, chips, links and issue rows",
+          "files": "reviewkit/site/app.css",
+          "effort": "S",
+          "status": "done",
+          "issues": [
+            "m-3",
+            "m-6"
+          ],
+          "fixes": [
+            "fix3"
+          ]
+        },
+        {
+          "id": "p-4",
+          "phase": "Keyboard",
+          "severity": "P1",
+          "title": "Keep focus inside the screenshot viewer; move focus to the view heading on navigation; add a skip link",
+          "files": [
+            "reviewkit/site/app.js",
+            "reviewkit/site/index.html",
+            "reviewkit/site/app.css"
+          ],
+          "effort": "M",
+          "status": "done",
+          "issues": [
+            "d-2",
+            "d-3"
+          ],
+          "fixes": [
+            "fix4"
+          ]
+        },
+        {
+          "id": "p-5",
+          "phase": "Clarity",
+          "severity": "P2",
+          "title": "Plain-language progress counts, legends on plan bars, correct ARIA for Tap mode and filter groups",
+          "files": "reviewkit/site/app.js",
+          "effort": "M",
+          "status": "done",
+          "issues": [
+            "m-4",
+            "m-8",
+            "d-5",
+            "m-7"
+          ],
+          "fixes": [
+            "fix5"
+          ]
+        },
+        {
+          "id": "p-6",
+          "phase": "Polish",
+          "severity": "P2",
+          "title": "Default fix cards to a platform with a before/after; respect prefers-reduced-motion",
+          "files": [
+            "reviewkit/site/app.js",
+            "reviewkit/site/app.css"
+          ],
+          "effort": "S",
+          "status": "done",
+          "issues": [
+            "d-4",
+            "d-6"
+          ],
+          "fixes": [
+            "fix6"
+          ]
+        },
+        {
+          "id": "p-7",
+          "phase": "Keyboard",
+          "severity": "P2",
+          "title": "Make side-by-side screenshots keyboard-openable",
+          "files": "reviewkit/site/app.js",
+          "effort": "S",
+          "status": "todo",
+          "issues": [
+            "d-7"
+          ]
+        }
+      ]
+    }
+  ]
+}

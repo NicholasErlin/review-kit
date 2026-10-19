@@ -10,13 +10,15 @@ SITE_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'site')
 
 DEFAULT_SEVERITIES = [
     {'id': 'P0', 'label': 'P0', 'color': '#c62828', 'description': 'Critical: broken flow, data loss or blocker'},
-    {'id': 'P1', 'label': 'P1', 'color': '#e07b00', 'description': 'Major: clearly wrong or painful, has a workaround'},
+    {'id': 'P1', 'label': 'P1', 'color': '#b45f00', 'description': 'Major: clearly wrong or painful, has a workaround'},
     {'id': 'P2', 'label': 'P2', 'color': '#2f7d5b', 'description': 'Minor: polish and consistency'},
 ]
 DEFAULT_PLATFORM = {'id': 'default', 'label': 'All', 'shape': 'auto'}
 ISSUE_STATUSES = ('open', 'partial', 'fixed', 'notabug', 'wontfix')
 PLAN_STATUSES = ('todo', 'doing', 'partial', 'done', 'dropped')
 DEFAULT_ACCENT = '#12454f'
+_UMASK = os.umask(0o022)
+os.umask(_UMASK)
 
 
 class ReviewError(Exception):
@@ -37,18 +39,30 @@ def dumps(data):
     return json.dumps(data, indent=2, ensure_ascii=False) + '\n'
 
 
-def save(path, data):
-    """Atomic write so a crash never leaves a half-written review.json."""
+def write_text(path, text):
+    """Atomic write (temp file + rename) so a crash never leaves a half-written file.
+
+    Keeps the mode of an existing file; new files get the usual umask-based mode, not mkstemp's 0600."""
     d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(prefix='.review-', suffix='.json', dir=d)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except FileNotFoundError:
+        mode = 0o666 & ~_UMASK
+    fd, tmp = tempfile.mkstemp(prefix='.review-', suffix='.tmp', dir=d)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            f.write(dumps(data))
+            f.write(text)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
+
+
+def save(path, data):
+    """Atomic write so a crash never leaves a half-written review.json."""
+    write_text(path, dumps(data))
 
 
 def load_schema():

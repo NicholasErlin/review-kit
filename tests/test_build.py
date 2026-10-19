@@ -108,7 +108,38 @@ class BuildTest(TempDirTest):
             build.build(review, out, quiet=True)
 
 
+    def test_asset_names_that_sanitise_alike_do_not_collide(self):
+        # regression: backend review issue-4
+        d = os.path.join(self.tmp, 'r')
+        self.png('r/screenshots/a b.png', 4, 8)
+        self.png('r/screenshots/a_b.png', 6, 8)
+        doc = minimal()
+        doc['issues'] = [{'id': 'one', 'title': 'One', 'screenshots': ['screenshots/a b.png']},
+                         {'id': 'two', 'title': 'Two', 'screenshots': ['screenshots/a_b.png']}]
+        review = self.write(doc, 'r/review.json')
+        out = os.path.join(d, 'site')
+        build.build(review, out, quiet=True)
+        srcs = [i['shots'][0]['src'].split('?')[0] for i in read_data(out)['issues']]
+        self.assertEqual(len(set(srcs)), 2, srcs)
+        for src, orig in zip(srcs, ('a b.png', 'a_b.png')):
+            with open(os.path.join(out, src), 'rb') as f, open(os.path.join(d, 'screenshots', orig), 'rb') as g:
+                self.assertEqual(f.read(), g.read(), src)
+        self.assertEqual(build.build(review, out, quiet=True)['assets']['kept'], 2)
+
+
 class ImagesTest(TempDirTest):
+    def test_publish_recopies_a_replaced_source_with_an_older_mtime(self):
+        # regression: backend review issue-5
+        src, dst = self.png('src.png', 4, 8), os.path.join(self.tmp, 'out', 'src.png')
+        self.assertEqual(images.publish(src, dst), 'copied')
+        self.assertEqual(images.publish(src, dst), 'kept')
+        other = self.png('other.png', 6, 8)
+        os.utime(other, (1e9, 1e9))
+        os.replace(other, src)
+        self.assertEqual(images.publish(src, dst), 'copied')
+        with open(src, 'rb') as f, open(dst, 'rb') as g:
+            self.assertEqual(f.read(), g.read())
+
     def test_png_size_and_fingerprint(self):
         p = self.png('a.png', 7, 3)
         self.assertEqual(images.size(p), (7, 3))
