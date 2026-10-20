@@ -1,0 +1,80 @@
+diff --git a/src/checkout/PaymentForm.tsx b/src/checkout/PaymentForm.tsx
+index 3b1c2a0..9f8e7d1 100644
+--- a/src/checkout/PaymentForm.tsx
++++ b/src/checkout/PaymentForm.tsx
+@@ -1,9 +1,11 @@
+ import { useState } from 'react';
+ import { submitPayment } from '../api/payments';
++import { useIdempotencyKey } from './useIdempotencyKey';
+ 
+ export function PaymentForm({ orderId }: { orderId: string }) {
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState<string | null>(null);
++  const key = useIdempotencyKey(orderId);
+ 
+   async function onSubmit(e: React.FormEvent) {
+     e.preventDefault();
+@@ -12,7 +14,7 @@ export function PaymentForm({ orderId }: { orderId: string }) {
+     setBusy(true);
+     setError(null);
+     try {
+-      await submitPayment(orderId);
++      await submitPayment(orderId, { idempotencyKey: key });
+     } catch (err) {
+       setError(err instanceof Error ? err.message : 'Payment failed');
+     } finally {
+diff --git a/src/checkout/useIdempotencyKey.ts b/src/checkout/useIdempotencyKey.ts
+new file mode 100644
+index 0000000..c4d2e11
+--- /dev/null
++++ b/src/checkout/useIdempotencyKey.ts
+@@ -0,0 +1,14 @@
++import { useMemo } from 'react';
++
++/** One key per order and page load, so a double click never charges twice. */
++export function useIdempotencyKey(orderId: string): string {
++  return useMemo(() => {
++    const stored = sessionStorage.getItem('idem:' + orderId);
++    if (stored) return stored;
++    const key = crypto.randomUUID();
++    sessionStorage.setItem('idem:' + orderId, key);
++    return key;
++  }, [orderId]);
++}
++
++export default useIdempotencyKey;
+diff --git a/src/api/payments.ts b/src/api/payments.ts
+index 77ab210..5e0c9f3 100644
+--- a/src/api/payments.ts
++++ b/src/api/payments.ts
+@@ -1,8 +1,12 @@
+ import { http } from './http';
+ 
+-export async function submitPayment(orderId: string): Promise<void> {
+-  await http.post(`/orders/${orderId}/pay`);
++export interface PayOptions { idempotencyKey: string }
++
++export async function submitPayment(orderId: string, opts: PayOptions): Promise<void> {
++  await http.post(`/orders/${orderId}/pay`, null, {
++    headers: { 'Idempotency-Key': opts.idempotencyKey },
++  });
+ }
+diff --git a/src/checkout/PaymentForm.test.tsx b/src/checkout/PaymentForm.test.tsx
+index 1a2b3c4..4d5e6f7 100644
+--- a/src/checkout/PaymentForm.test.tsx
++++ b/src/checkout/PaymentForm.test.tsx
+@@ -20,6 +20,15 @@ describe('PaymentForm', () => {
+     expect(submitPayment).toHaveBeenCalledTimes(1);
+   });
+ 
++  it('sends the same idempotency key on a retry', async () => {
++    render(<PaymentForm orderId="o-1" />);
++    await user.click(screen.getByRole('button', { name: 'Pay' }));
++    await user.click(screen.getByRole('button', { name: 'Pay' }));
++    const keys = vi.mocked(submitPayment).mock.calls.map((c) => c[1].idempotencyKey);
++    expect(new Set(keys).size).toBe(1);
++  });
++
+   it('shows the error message', async () => {
+     vi.mocked(submitPayment).mockRejectedValueOnce(new Error('Card declined'));
+     render(<PaymentForm orderId="o-1" />);

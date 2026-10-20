@@ -18,7 +18,7 @@ import {
   sorted, strip,
 } from './py.js';
 
-export const KINDS = ['ui', 'backend', 'ideas', 'design'];
+export const KINDS = ['ui', 'backend', 'ideas', 'design', 'prs'];
 
 // The commits the bundle was taken from. Bump deliberately, then run `review-kit companions update`.
 export const SOURCES: Record<string, string> = {
@@ -59,6 +59,7 @@ export const COMPANIONS: Record<string, Companion[]> = {
     },
   ],
   ideas: [],
+  prs: [],
   design: [], // filled below: the UI companion for UI options, the backend ones for API/architecture options
 };
 COMPANIONS.design = [...COMPANIONS.ui, ...COMPANIONS.backend];

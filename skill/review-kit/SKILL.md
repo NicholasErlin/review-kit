@@ -31,6 +31,7 @@ Each review has a kind, set as `project.kind`. Missing means `ui`.
 
 | Kind | What it reviews | Evidence | Playbook | Companion skills |
 | --- | --- | --- | --- | --- |
+| `prs` | Pull requests across repos: mine and reviewing | GitHub snapshots, diffs, draft findings and one selected review | `prs-review.md` | none required |
 | `ui` | UI/UX: accessibility, touch, layout, type, forms, navigation | before/after screenshots | `ui-review.md` | ui-ux-pro-max |
 | `backend` | Backend practices: security, correctness, errors, API design, data, architecture, tests | code, test and command output | `backend-review.md` | api-design-principles, architecture-patterns, error-handling-patterns |
 | `ideas` | Research and ideas: what to build and why | cited sources, reasoning, alternatives, risks | `ideas-review.md` | none required |
@@ -135,3 +136,7 @@ For "what should we build" and "which way should we build it", the flow is:
 - Theme: `project.theme.accent`, `project.theme.logoText`.
 - `rk validate` checks the schema, references and images. `rk schema` prints the schema path.
 - When you edit `review.json` by hand, run `rk validate` afterwards. Prefer the CLI, which validates before saving.
+
+## 8. Pull requests across repositories
+
+For a PR dashboard use `rk init .review/prs --kind prs`, then `rk pr add --mine` and/or `rk pr add --requested`. Read [prs-review.md](prs-review.md) before acting. Sync and diagnose freely; external GitHub actions require the user's explicit word for that PR. In reviewing mode, draft exact findings and a verdict; only the user selects which findings to ship, and shipping itself needs explicit approval. `rk serve prs --sync-prs 5` enables local action buttons; disk and LAN pages offer standalone `gh` commands.

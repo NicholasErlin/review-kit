@@ -1,5 +1,6 @@
 /** Plain-text / Markdown progress summary of a review.json (for status updates and hand-off messages). */
 import * as model from './model.js';
+import * as prs from './prs.js';
 import { cmpStr, get, has, strip, truthy, WS } from './py.js';
 
 export const RESOLVED = ['fixed', 'notabug', 'wontfix'];
@@ -39,6 +40,15 @@ export function summarise(data: any, openLimit = 8, markdown = true): string {
     }
     return c;
   };
+
+  if (prs.prList(data).length && !issues.length && !fixes.length) { // a PR dashboard
+    lines.push(...prs.summaryLines(data, markdown));
+    return lines.join('\n');
+  }
+  if (get(data.project, 'kind') === 'prs' && !issues.length && !fixes.length) {
+    lines.push('No PRs yet (`review-kit pr add <url>` or `review-kit pr add --mine`).');
+    return lines.join('\n');
+  }
 
   const research: any[] = get(data, 'research') || [];
   const ideas: any[] = get(data, 'ideas') || [];

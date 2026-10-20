@@ -1,5 +1,10 @@
 /** A tiny static server for the built site, with optional rebuild-on-change. */
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
+import * as prs from './prs.js';
+import * as model from './model.js';
+import * as edit from './edit.js';
+import { loadReviews } from './build.js';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
 import fs from 'node:fs';
@@ -123,7 +128,7 @@ function logLine(addr: string, text: string): void {
 }
 
 /** The request handler: SimpleHTTPRequestHandler plus review-kit's publication checks. */
-export function createHandler(directory: string) {
+export function createHandler(directory: string, live = false) {
   const dir = abspath(directory);
   return (req: http.IncomingMessage, res: http.ServerResponse): void => {
     const addr = req.socket.remoteAddress || '-';
@@ -144,7 +149,7 @@ export function createHandler(directory: string) {
     const endHeaders = () => {
       // Assets are cache-busted with ?v=..., but index.html and data.js must always be revalidated.
       headers.push(['Cache-Control', 'no-cache'], ['X-Content-Type-Options', 'nosniff'], ['Referrer-Policy', 'no-referrer'],
-        ['Content-Security-Policy', CSP]);
+        ['Content-Security-Policy', live ? CSP.replace("connect-src 'none'", "connect-src 'self'") : CSP]);
       res.shouldKeepAlive = false;
       res.writeHead(status, reason, headers.flat());
     };
@@ -273,6 +278,12 @@ export function createHandler(directory: string) {
       res.end();
       return;
     }
+    if (live && ctype === 'text/html') {
+      const html = fs.readFileSync(fd, 'utf8').replace("connect-src 'none'", "connect-src 'self'");
+      fs.closeSync(fd);
+      res.end(html);
+      return;
+    }
     const stream = fs.createReadStream('', { fd });
     stream.on('error', () => res.destroy());
     stream.pipe(res);
@@ -395,6 +406,7 @@ function watch(reviewPath: string | string[], out: string, maxWidth: number | nu
 
 function lookup4(host: string): Promise<string> {
   if (host === '') return Promise.resolve('0.0.0.0');
+  if (host === '::1') return Promise.resolve('::1');
   return new Promise((resolve, reject) => {
     dns.lookup(host, { family: 4 }, (err, address) => (err ? reject(err) : resolve(address)));
   });
@@ -404,6 +416,8 @@ export interface ServeOptions {
   reviewPath?: string | string[] | null;
   watch?: boolean;
   maxWidth?: number | null;
+  syncPrs?: number | null;
+  allowRemoteActions?: boolean;
 }
 
 /** Start the server and resolve once it is listening (it keeps running until the process stops). */
@@ -420,7 +434,9 @@ export async function serve(directory: string, host = '127.0.0.1', port = 8787, 
     }
     if (!ok) throw new ReviewError('old or invalid site manifest; run `review-kit build` again');
   }
-  const server = http.createServer(createHandler(directory));
+  const live = createLiveHandler(directory, host, opts);
+  const server = http.createServer(live.handler);
+  server.on('close', live.close);
   try {
     const address = await lookup4(host);
     await new Promise<void>((resolve, reject) => {
@@ -458,4 +474,119 @@ export async function serve(directory: string, host = '127.0.0.1', port = 8787, 
   }
   print('Ctrl+C to stop.');
   return server;
+}
+
+
+/** Local capability API. All writers (including the timer) share a queue and reload the review before writing. */
+export function createLiveHandler(directory: string, host: string, opts: ServeOptions = {}) {
+  const paths = typeof opts.reviewPath === 'string' ? [opts.reviewPath] : opts.reviewPath || [];
+  const refs = paths.length ? loadReviews(paths).filter((r) => r.kind === 'prs') : [];
+  const enabled = refs.length > 0 && (LOOPBACK_HOSTS.includes(host) || opts.allowRemoteActions === true);
+  if (enabled && !LOOPBACK_HOSTS.includes(host)) print('WARNING: remote actions explicitly enabled; local Host and token checks still apply.');
+  if (opts.syncPrs != null && (!Number.isFinite(opts.syncPrs) || opts.syncPrs <= 0)) throw new ReviewError('--sync-prs must be a positive number of minutes');
+  const token = crypto.randomBytes(32).toString('hex');
+  const built = () => fs.statSync(join(directory, isfile(join(directory, 'data.js')) ? 'data.js' : 'index.html')).mtime.toISOString();
+  const staticHandler = createHandler(directory, enabled);
+  let queue = Promise.resolve();
+  const enqueue = (fn: () => void) => { queue = queue.then(fn).catch((e) => eprint('PR action failed:', e.message)); };
+  const rebuildNow = () => { buildSite(paths, directory, { maxWidth: opts.maxWidth ?? null, quiet: true }); };
+  const json = (res: http.ServerResponse, code: number, body: any) => {
+    res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    res.end(JSON.stringify(body));
+  };
+  const allowed = new Set(['sync', 'set', ...prs.ACTIONS, 'finding', 'flag', 'drop', 'verdict', 'ship']);
+  const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const url = (req.url || '/').split('?')[0];
+    if (!url.startsWith('/api/')) return staticHandler(req, res);
+    const local = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i.test(req.headers.host || '');
+    if (url === '/api/session' && req.method === 'GET') return json(res, 200, enabled && local ? { actions: true, token, version: VERSION } : { actions: false });
+    if (url === '/api/version' && req.method === 'GET' && local) return json(res, 200, { built: built() });
+    const action = url.slice('/api/prs/'.length);
+    const origin = req.headers.origin;
+    const supplied = req.headers['x-review-kit-token'];
+    if (!enabled || !local || req.method !== 'POST' || !url.startsWith('/api/prs/') || !allowed.has(action)
+      || typeof supplied !== 'string' || !/^[a-f0-9]{64}$/.test(supplied)
+      || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(token))
+      || (origin !== undefined && origin !== `http://${req.headers.host}`)
+      || !/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) {
+      req.resume(); json(res, 403, { ok: false, error: 'Action forbidden' }); return;
+    }
+    const chunks: Buffer[] = [];
+    let size = 0, rejected = false;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 65536) {
+        if (!rejected) json(res, 403, { ok: false, error: 'Body exceeds 64 KB' });
+        rejected = true; chunks.length = 0;
+      } else if (!rejected) chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (rejected) return;
+      let a: any;
+      try { a = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { json(res, 400, { ok: false, error: 'Invalid JSON' }); return; }
+      if (!isDict(a)) return json(res, 400, { ok: false, error: 'Expected an object' });
+      enqueue(() => {
+        let target = '-';
+        try {
+          const r = refs.find((r) => r.key === a.review || (paths.length === 1 && (a.review === '' || a.review === 'prs')));
+          if (!r) { json(res, 403, { ok: false, error: 'Unknown review' }); return; }
+          const data = edit.loadChecked(r.path);
+          let pr: any = null;
+          if (a.id !== undefined || action !== 'sync') {
+            pr = prs.prList(data).find((p) => p.id === a.id);
+            if (!pr) { json(res, 403, { ok: false, error: 'Unknown PR' }); return; }
+            target = `${pr.repo}#${pr.number}`;
+          }
+          let message = 'Updated', payload: any;
+          if (action === 'sync') {
+            const results = prs.sync(r.base, data, pr ? [pr.id] : []);
+            // Persist successful fetches even if another PR failed.
+            edit.check(data, r.base); model.save(r.path, data); rebuildNow();
+            if (results.some((r) => !r.ok)) throw new ReviewError(results.filter((r) => !r.ok).map((r) => r.line).join('\n'));
+            message = 'Synced';
+          } else if (action === 'set') prs.applyFields(pr, a);
+          else if (action === 'finding') prs.upsertFinding(pr, { ...a, id: a.finding }, !!a.finding);
+          else if (action === 'flag') {
+            if (!Array.isArray(a.findings) || typeof a.ship !== 'boolean') throw new ReviewError('Expected findings and ship');
+            message = prs.flag(pr, a.findings, a.ship);
+          } else if (action === 'drop') message = prs.drop(pr, a.finding);
+          else if (action === 'verdict') message = prs.setVerdict(pr, a.event, a.body);
+          else if (action === 'ship') {
+            if (a.expectedPayload !== undefined && JSON.stringify(a.expectedPayload) !== JSON.stringify(prs.reviewPayload(r.base, pr).payload)) {
+              throw new ReviewError('The review changed since preview; preview it again before sending.');
+            }
+            const result = prs.ship(r.base, data, pr.id, a.dryRun === true);
+            message = result.message; payload = result.plan.payload;
+          } else message = prs.act(r.base, data, pr.id, action, a).message;
+          if (!(action === 'ship' && a.dryRun === true)) {
+            edit.check(data, r.base); model.save(r.path, data); rebuildNow();
+          }
+          // Read the compiled payload produced by the same builder the CLI uses. Never return local source paths.
+          const js = fs.readFileSync(join(directory, 'data.js'), 'utf8');
+          const compiled = JSON.parse(js.slice(js.indexOf('=') + 1).trim().replace(/;$/, ''));
+          const site = paths.length === 1 ? compiled : compiled.find((x: any) => x.key === r.key).data;
+          json(res, 200, { ok: true, message, payload, pr: pr ? site.prs.find((p: any) => p.id === pr.id) : null, prs: site.prs, built: built() });
+          print(new Date().toISOString(), action, target, 'ok');
+        } catch (e) {
+          const error = e instanceof ReviewError ? e.message : 'Action failed';
+          json(res, e instanceof ReviewError ? 400 : 500, { ok: false, error });
+          print(new Date().toISOString(), action, target, 'failed');
+        }
+      });
+    });
+  };
+  let timer: ReturnType<typeof setInterval> | undefined;
+  if (opts.syncPrs && refs.length) {
+    timer = setInterval(() => enqueue(() => {
+      for (const r of refs) {
+        const data = edit.loadChecked(r.path);
+        for (const result of prs.sync(r.base, data)) if (!result.ok) eprint(result.line);
+        edit.check(data, r.base); model.save(r.path, data);
+      }
+      rebuildNow(); print(new Date().toISOString(), 'sync', 'all', 'ok');
+    }), opts.syncPrs * 60_000);
+    timer.unref();
+  }
+  return { handler, close: () => { if (timer) clearInterval(timer); } };
 }

@@ -1,0 +1,25 @@
+diff --git a/app/coupons/routes.py b/app/coupons/routes.py
+new file mode 100644
+index 0000000..3e4f5a6
+--- /dev/null
++++ b/app/coupons/routes.py
+@@ -0,0 +1,20 @@
++from fastapi import APIRouter, Depends, HTTPException
++from sqlalchemy.orm import Session
++
++from app.db import get_db
++from app.models import Coupon
++
++router = APIRouter(prefix="/coupons")
++
++
++@router.get("/{code}")
++async def get_coupon(code: str, db: Session = Depends(get_db)) -> dict:
++    coupon = db.query(Coupon).filter(Coupon.code == code.upper()).one_or_none()
++    if coupon is None or not coupon.active:
++        raise HTTPException(404, "No such coupon")
++    return {"code": coupon.code, "percent": coupon.percent}
++
++
++def _rate_limit_key(code: str) -> str:
++    return "coupon:" + code.upper()

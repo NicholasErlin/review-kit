@@ -20,19 +20,24 @@ export const KIND_DEFAULTS: Record<string, { title: string; platforms: string[];
   backend: { title: 'Backend review', platforms: ['default'], label: 'Backend practices' },
   ideas: { title: 'Ideas and research', platforms: ['default'], label: 'Ideas and research' },
   design: { title: 'Design proposals', platforms: ['mobile', 'desktop'], label: 'Design proposals' },
+  prs: { title: 'Pull requests', platforms: ['default'], label: 'Pull request dashboard' },
 };
 /** Kinds whose --platforms override applies (the screen-based ones). */
 const SCREEN_KINDS = ['ui', 'design'];
 /** Pointer order: the flow runs ideas -> design -> ui/backend review. */
-const POINTER_ORDER = ['ideas', 'design', 'ui', 'backend'];
+const POINTER_ORDER = ['prs', 'ideas', 'design', 'ui', 'backend'];
 export const KINDS = Object.keys(KIND_DEFAULTS);
 
 /** reviews: [kind, reviewRelDir][] */
 export function pointer(reviews: [string, string][]): string {
   const rows = reviews.map(([k, rel]) => `- ${KIND_DEFAULTS[k].label}: \`${rel}/review.json\``).join('\n');
-  const flow = reviews.some(([k]) => k === 'ideas' || k === 'design')
+  let flow = reviews.some(([k]) => k === 'ideas' || k === 'design')
     ? '\nIdeation only researches and proposes; design options are built on their own branches and adopted only when the\nuser picks one.\n'
     : '';
+  if (reviews.some(([k]) => k === 'prs')) {
+    flow += '\nThe PR dashboard is kept in sync and annotated; commenting, merging, closing, re-running, reviewing or pushing\n'
+      + 'happens only on the user\'s word for that PR.\n';
+  }
   return `${BEGIN}
 ## Review tracking (review-kit)
 

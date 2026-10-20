@@ -1,0 +1,26 @@
+diff --git a/cmd/nimbus/login.go b/cmd/nimbus/login.go
+index 0a1b2c3..4d5e6f7 100644
+--- a/cmd/nimbus/login.go
++++ b/cmd/nimbus/login.go
+@@ -30,14 +30,24 @@ var loginCmd = &cobra.Command{
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+-		token, err := promptToken()
++		token := os.Getenv("NIMBUS_TOKEN")
++		if token == "" {
++			var err error
++			token, err = promptToken()
++			if err != nil {
++				return err
++			}
++		}
++		if err := saveToken(token); err != nil {
++			return fmt.Errorf("save token: %w", err)
++		}
++		fmt.Println("Logged in as", whoami(token))
++		return nil
+-		if err != nil {
+-			return err
+-		}
+-		return saveToken(token)
+ 	},
+ }

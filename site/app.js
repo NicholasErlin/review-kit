@@ -14,10 +14,11 @@
   function dateKey(s) { var t = Date.parse(s || ''); return isNaN(t) ? 0 : t; }
   function pct(n, d) { return d ? 100 * n / d : 0; }
   function hex(c) { c = c.replace('#', ''); if (c.length === 3) c = c.replace(/./g, '$&$&'); return [0, 2, 4].map(function (i) { return parseInt(c.substr(i, 2), 16); }); }
-  var KINDS = { ui: 1, backend: 1, ideas: 1, design: 1 };
+  var KINDS = { ui: 1, backend: 1, ideas: 1, design: 1, prs: 1 };
   function kindOf(D, key) { // project.kind, else the combined-site key, else guess from the data
     var k = D.project.kind || (KINDS[key] ? key : '');
     if (KINDS[k]) return k;
+    if ((D.prs || []).length && !(D.issues || []).length) return 'prs';
     if ((D.proposals || []).length && !D.issues.length) return 'design';
     if (((D.ideas || []).length || (D.research || []).length) && !D.issues.length) return 'ideas';
     return k || 'ui';
@@ -30,8 +31,11 @@
   // (#/<key>/issues/...) in a combined site; it is '' in a single-review site (#/issues/...).
   function Review(D, key) {
     var P = D.project;
+    ['platforms', 'severities', 'areas', 'issues', 'fixes', 'plan', 'appendix'].forEach(function (k) { if (!D[k]) D[k] = []; }); // a PRs review may leave these out
+    if (!D.statusLabels) D.statusLabels = {};
+    if (!D.planLabels) D.planLabels = {};
     var H = key ? '#/' + key + '/' : '#/';
-    var current = 'overview';
+    var current = 'overview', lastParts = [];
     // ------------------------------------------------------------ model
     var PLATS = D.platforms.map(function (p) { return p.id; });
     var PL = {}; D.platforms.forEach(function (p) { PL[p.id] = p; });
@@ -107,12 +111,242 @@
       return R[a.status] - R[b.status] || sr(a.sev) - sr(b.sev) || PLATS.indexOf(a.platform) - PLATS.indexOf(b.platform) || a.idx - b.idx;
     }
 
+    // ------------------------------------------------------------ PR dashboard
+    var PRS = D.prs || [], prFilter = { role: 'all', repo: '', q: '' }, prBusy = false;
+    var diffObserver = null;
+    var live = false, session = null, version = '', prSelected = null;
+    var groupOrder = ['action', 'ready', 'waiting', 'draft', 'to-ship', 'in-review', 'updated', 'to-review', 'waiting-author', 'merged', 'closed', 'done'];
+    var groupLabels = D.prGroupLabels || {};
+    function prHref(p) { return H + 'pr/' + encodeURIComponent(p.id); }
+    function prLink(url, text) { return '<a href="' + esc(safeHref(url)) + '" target="_blank" rel="noopener noreferrer">' + esc(text) + '</a>'; }
+    function prChips(p) {
+      var fail = p.checks.filter(function (c) { return c.failed; }).length, pending = p.checks.filter(function (c) { return c.pending; }).length;
+      var unresolved = p.threads.filter(function (t) { return !t.resolved; }).length;
+      return '<div class="pr-chips"><span class="pr-chip ' + (fail ? 'bad' : pending ? 'warn' : 'good') + '">CI ' + (fail ? '✗ ' + fail + ' failed' : pending ? '● ' + pending + ' running' : '✓') + '</span>' +
+        (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY' ? '<span class="pr-chip bad">Conflicts</span>' : '') +
+        '<span class="pr-chip">' + esc((p.reviewDecision || 'No review required').replace(/_/g, ' ').toLowerCase()) + '</span>' +
+        (unresolved ? '<span class="pr-chip warn">' + unresolved + ' unresolved</span>' : '') +
+        '<span class="pr-chip pr-lines">+' + p.additions + ' −' + p.deletions + '</span></div>';
+    }
+    function prButton(action, label, extra) { return '<button class="btn" type="button" data-pr-action="' + action + '"' + (extra || '') + '>' + esc(label) + (!live && !['flag', 'drop', 'finding', 'verdict', 'set', 'ship'].includes(action) ? ' · Copy command' : '') + '</button>'; }
+    function prToast(text) {
+      var el = document.getElementById('pr-toast');
+      if (!el) { el = document.createElement('div'); el.id = 'pr-toast'; el.className = 'pr-toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+      el.textContent = text;
+      clearTimeout(el.hide); el.hide = setTimeout(function () { el.remove(); }, 7000);
+    }
+    function visiblePrs() { return PRS.slice().sort(function (a, b) { return groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group); }).filter(function (p) { return (prFilter.role === 'all' || p.role === prFilter.role) && (!prFilter.repo || p.repo === prFilter.repo) && (!prFilter.q || [p.title, p.repo, p.next, p.id].join(' ').toLowerCase().includes(prFilter.q)); }); }
+    function viewBoard() {
+      if (diffObserver) diffObserver.disconnect();
+      prSelected = null;
+      var list = visiblePrs();
+      var counts = groupOrder.map(function (g) { var n = PRS.filter(function (p) { return p.group === g; }).length; return n ? '<span><b>' + n + '</b> ' + esc(groupLabels[g] || g) + '</span>' : ''; }).join('');
+      app.innerHTML = '<div class="pr-heading"><div><p class="eyebrow">PULL REQUESTS</p><h1 class="view-title">Your merge desk</h1><p class="small">Across repositories · ' + (live ? 'Live actions on localhost' : 'Copy commands to act with gh') + '</p></div>' + prButton('sync', 'Sync all') + '</div>' +
+        '<div class="pr-counts">' + counts + '</div><div class="pr-filters"><div role="group" aria-label="Role">' + ['all', 'mine', 'reviewing'].map(function (r) { return '<button class="chip' + (r === prFilter.role ? ' on' : '') + '" data-role="' + r + '" aria-pressed="' + (r === prFilter.role) + '">' + { all: 'All', mine: 'Mine', reviewing: 'Reviewing' }[r] + '</button>'; }).join('') +
+        '</div><div class="pr-repos" role="group" aria-label="Repository">' + [''].concat(PRS.map(function (p) { return p.repo; }).filter(function (r, i, a) { return a.indexOf(r) === i; })).map(function (r) { return '<button class="chip' + (r === prFilter.repo ? ' on' : '') + '" data-repo="' + esc(r) + '" aria-pressed="' + (r === prFilter.repo) + '">' + esc(r || 'All repositories') + '</button>'; }).join('') + '</div><label>Search<input type="search" id="pr-search" value="' + esc(prFilter.q) + '" placeholder="Title, repository, next step…"></label></div><div id="pr-groups">' +
+        groupOrder.map(function (g) {
+          var ps = list.filter(function (p) { return p.group === g; });
+          if (!ps.length) return '';
+          var closed = ['merged', 'closed', 'done'].includes(g);
+          return (closed ? '<details class="pr-group"><summary>' : '<section class="pr-group"><h2>') + esc(groupLabels[g] || g) + ' <span class="small">' + ps.length + '</span>' + (closed ? '</summary>' : '</h2>') + '<div class="pr-grid">' + ps.map(function (p) {
+            var drafts = p.findings.filter(function (f) { return f.status === 'draft'; });
+            return '<article class="card pr-card"><div class="pr-meta">' + esc(p.repo) + ' <span>#' + p.number + ' · ' + (p.role === 'reviewing' ? 'Reviewing' : 'Mine') + '</span></div><h3><a href="' + prHref(p) + '">' + esc(p.title) + '</a></h3>' + prChips(p) +
+              (p.role === 'reviewing' ? '<p class="small">' + ['P0', 'P1', 'P2', 'nit'].map(function (s) { var n = drafts.filter(function (f) { return f.severity === s; }).length; return n ? n + ' ' + s : ''; }).filter(Boolean).join(' · ') + (drafts.length ? ' · ' : '') + drafts.filter(function (f) { return f.ship; }).length + ' flagged</p>' : '') +
+              '<p class="pr-blocker">' + esc(p.blockers[0] ? p.blockers[0].text : p.group === 'ready' ? 'All clear — ready to merge' : groupLabels[p.group]) + '</p>' + (p.next ? '<p class="pr-next"><b>Next</b> ' + esc(p.next) + '</p>' : '') + '<p class="small pr-age">' + esc(p.ageText) + '</p></article>';
+          }).join('') + '</div>' + (closed ? '</details>' : '</section>');
+        }).join('') + (list.length ? '' : '<p class="card">No matching PRs.</p>') + '</div>';
+      app.querySelectorAll('[data-role]').forEach(function (b) { b.onclick = function () { prFilter.role = b.dataset.role; viewBoard(); app.querySelector('[data-role="' + prFilter.role + '"]').focus(); }; });
+      app.querySelectorAll('[data-repo]').forEach(function (b) { b.onclick = function () { prFilter.repo = b.dataset.repo; viewBoard(); var buttons = app.querySelectorAll('[data-repo]'); Array.from(buttons).find(function (el) { return el.dataset.repo === prFilter.repo; }).focus(); }; });
+      document.getElementById('pr-search').oninput = function (e) { var pos = e.target.selectionStart; prFilter.q = e.target.value.toLowerCase(); viewBoard(); var input = document.getElementById('pr-search'); input.focus(); if (pos != null) input.setSelectionRange(pos, pos); };
+      bindPrActions(null);
+    }
+    function findingCard(f) {
+      return '<article class="pr-finding' + (f.stale ? ' stale' : '') + '" data-finding="' + esc(f.id) + '"><div class="pr-meta">' + esc(f.severity) + ' · ' + esc(f.path || 'General comment') + (f.line ? ':' + f.line + ' ' + f.side : '') + '</div><h3>' + esc(f.title) + '</h3>' + (f.stale ? '<p class="pr-warning">Written before the latest commits — re-check the location.</p>' : '') + '<div class="rich">' + f.html + '</div>' +
+        (f.status === 'draft' ? '<div class="pr-actions"><button class="btn" data-pr-action="flag" data-finding="' + esc(f.id) + '" aria-pressed="' + f.ship + '">' + (f.ship ? '✓ Flagged to ship' : 'Ship') + '</button>' + prButton('finding', 'Edit', ' data-finding="' + esc(f.id) + '"') + prButton('drop', 'Drop', ' data-finding="' + esc(f.id) + '"') + '</div>' : '<p class="small">' + esc(f.status) + (f.posted && f.posted.url ? ' · ' + prLink(f.posted.url, 'View review') : '') + '</p>') + '</article>';
+    }
+    function prSection(title, body, id) { return '<section class="card pr-section"' + (id ? ' id="' + id + '"' : '') + '><h2>' + title + '</h2>' + body + '</section>'; }
+    function viewPr(parts) {
+      var p = PRS.find(function (p) { return p.id === parts[0]; });
+      if (!p) { app.innerHTML = '<h1>PR not found</h1><a href="' + H + 'overview">Back to PRs</a>'; return; }
+      prSelected = p.id;
+      var blocking = p.blockers.map(function (b) {
+        var acts = { 'checks-failed': prButton('rerun', 'Re-run failed'), behind: prButton('update-branch', 'Update branch'), draft: prButton('ready', 'Mark ready'), threads: '<button class="btn" data-jump-threads>Jump to threads</button>', conflicts: '<button class="btn" data-copy="' + esc(p.commands.checkout) + '">Copy checkout command</button><p class="small">Check out this PR, merge or rebase ' + esc(p.base) + ', resolve conflicts and run tests before pushing.</p>' };
+        return '<li><span>' + esc(b.text) + '</span><div>' + (acts[b.code] || '') + '</div></li>';
+      }).join('');
+      var workflows = {};
+      p.checks.slice().sort(function (a, b) { return +b.failed - +a.failed || +b.pending - +a.pending; }).forEach(function (c) { (workflows[c.workflow || 'Checks'] || (workflows[c.workflow || 'Checks'] = [])).push(c); });
+      var checks = Object.keys(workflows).sort(function (a, b) { return +workflows[b].some(function (c) { return c.failed; }) - +workflows[a].some(function (c) { return c.failed; }); }).map(function (w) { return '<h3>' + esc(w) + '</h3><ul class="pr-checks">' + workflows[w].map(function (c) { return '<li><span class="' + (c.failed ? 'bad' : c.pending ? 'warn' : 'good') + '">' + (c.failed ? '✗' : c.pending ? '●' : '✓') + '</span> ' + prLink(c.url, c.name) + ' <span class="small">' + esc(c.conclusion || c.status) + '</span></li>'; }).join('') + '</ul>'; }).join('');
+      var conversation = p.reviews.map(function (r) { return { author: r.author, html: r.html, created: r.submitted, url: r.url, state: r.state }; }).concat(p.comments).sort(function (a, b) { return dateKey(a.created) - dateKey(b.created); });
+      function comment(c) { return '<article class="pr-comment"><div class="pr-meta">' + esc(c.author) + (c.state ? ' · ' + esc(c.state.replace(/_/g, ' ')) : '') + ' · ' + prLink(c.url, c.created || 'GitHub') + '</div><div class="rich">' + c.html + '</div></article>'; }
+      var threads = p.threads.slice().sort(function (a, b) { return +a.resolved - +b.resolved || a.path.localeCompare(b.path); }).map(function (t) { return '<article class="pr-thread" data-thread="' + esc(t.id) + '"><h3>' + esc(t.path) + (t.line ? ':' + t.line : '') + '</h3><p class="small">' + (t.resolved ? 'Resolved' : 'Unresolved') + (t.outdated ? ' · Outdated' : '') + '</p>' + t.comments.map(comment).join('') + '<div class="pr-actions">' + prButton('reply', 'Reply', ' data-thread="' + esc(t.id) + '"') + prButton('resolve', t.resolved ? 'Unresolve' : 'Resolve', ' data-thread="' + esc(t.id) + '"') + '</div></article>'; }).join('');
+      app.innerHTML = '<p class="back"><a href="' + H + 'overview">← PRs</a></p><header class="pr-detail"><div class="pr-meta">' + prLink(p.url, p.repo + '#' + p.number) + ' · ' + (p.role === 'reviewing' ? 'Reviewing' : 'Mine') + '</div><h1 class="view-title">' + esc(p.title) + '</h1><p><code>' + esc(p.head) + ' → ' + esc(p.base) + '</code></p>' + prChips(p) + '<p class="small">' + esc(p.ageText) + '</p><div class="pr-actions">' + prButton('sync', 'Sync') + prButton('comment', 'Comment') + (p.state === 'OPEN' ? prButton('merge', 'Merge') + prButton('close', 'Close') + prButton('update-branch', 'Update branch') + prButton('ready', p.draft ? 'Mark ready' : 'Mark draft') + prButton('request', 'Request reviewers') : p.state === 'CLOSED' ? prButton('reopen', 'Reopen') : '') + '</div></header>' +
+        prSection("What’s blocking", blocking ? '<ul class="pr-blockers">' + blocking + '</ul>' : '<p>All clear.</p>' + (p.state === 'OPEN' && p.role === 'mine' ? prButton('merge', 'Merge') : '')) +
+        '<div class="pr-columns">' + prSection('Checks', checks || '<p class="small">No checks.</p>') + prSection('Conversation', conversation.map(comment).join('') || '<p class="small">No conversation yet.</p>') + '</div>' +
+        prSection('Review threads', threads || '<p class="small">No review threads.</p>', 'pr-threads') +
+        prSection('Files', '<ul class="pr-files">' + p.files.map(function (f) { return '<li><button class="btn" data-file="' + esc(f.path) + '">' + esc(f.path) + '</button><span class="pr-lines">+' + f.add + ' −' + f.del + '</span></li>'; }).join('') + '</ul>') +
+        prSection('Diff', '<p class="small">' + (p.role === 'reviewing' ? live ? 'Select a line to draft a finding. Only flagged findings are sent.' : 'Findings edited here stay in this browser until copied to GitHub.' : 'Read the changes and review threads.') + '</p><div id="pr-diff" class="diffv"></div>') +
+        (p.role === 'reviewing' ? prSection('Findings', '<div id="pr-findings">' + p.findings.filter(function (f) { return f.status !== 'dropped'; }).map(findingCard).join('') + '</div>' + prButton('finding', 'Add general finding')) : '') +
+        prSection('Description', '<div class="rich">' + p.body + '</div>') + prSection('Notes / Next', '<p><b>Next:</b> ' + esc(p.next || 'No next step recorded.') + '</p><div class="rich">' + p.notes + '</div>' + (live ? prButton('set', 'Edit notes / next') : '')) +
+        (p.role === 'reviewing' ? '<aside class="pr-shipbar" aria-label="Ship review"><div><b>' + p.findings.filter(function (f) { return f.ship && f.status === 'draft'; }).length + ' findings flagged</b><span class="small">Only these findings and your verdict will be sent</span></div><button class="btn" data-pr-action="verdict">' + esc((p.verdict ? p.verdict.event : 'COMMENT').replace(/_/g, ' ')) + ' ▾</button>' + prButton('ship', live ? 'Preview & send' : 'Copy gh command') + '</aside>' : '');
+      bindPrActions(p);
+      app.querySelectorAll('[data-file]').forEach(function (b) { b.onclick = function () { var f = Array.from(app.querySelectorAll('#pr-diff .dfile')).find(function (d) { return d.dataset.path === b.dataset.file; }); if (f) { f.open = true; f.fill(); f.scrollIntoView({ block: 'start' }); f.querySelector('summary').focus(); } }; });
+      app.querySelectorAll('[data-jump-threads]').forEach(function (b) { b.onclick = function () { var section = document.getElementById('pr-threads'); section.scrollIntoView(); section.tabIndex = -1; section.focus({ preventScroll: true }); }; });
+      loadPrDiff(p);
+    }
+    function loadPrDiff(p) {
+      var box = document.getElementById('pr-diff');
+      if (diffObserver) diffObserver.disconnect();
+      function sizeFindings() { box.style.setProperty('--pr-diff-width', Math.max(100, box.clientWidth - 2) + 'px'); }
+      sizeFindings();
+      diffObserver = new ResizeObserver(sizeFindings); diffObserver.observe(box);
+      if (!p.diff) { box.textContent = 'No diff available. Sync this PR to fetch it.'; return; }
+      function fill() {
+        if (!document.contains(box)) return;
+        box.textContent = '';
+        renderDiff(box, (window.REVIEW_DIFFS || {})[p.diff.key] || '', p.diffTruncated || p.diff.truncated, { lines: true, lazy: true, onFile: function (det, file) {
+          var rows = Array.from(det.querySelectorAll('pre.dl span'));
+          rows.forEach(function (row) {
+            var n = row.dataset.n || row.dataset.o, side = row.dataset.n ? 'RIGHT' : 'LEFT';
+            if (n && live && p.role === 'reviewing') { row.tabIndex = 0; row.setAttribute('role', 'button'); row.setAttribute('aria-label', 'Add finding at ' + file.path + ':' + n); row.onclick = function () { findingDialog(p, null, { path: file.path, line: +n, side: side }); }; row.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } }; }
+          });
+          p.findings.filter(function (f) { return f.path === file.path && f.status !== 'dropped'; }).forEach(function (f) {
+            var row = rows.find(function (r) { return +(f.side === 'LEFT' ? r.dataset.o : r.dataset.n) === f.line; });
+            var wrap = document.createElement('div'); wrap.className = 'pr-inline'; wrap.innerHTML = findingCard(f);
+            if (row) row.after(wrap); else det.appendChild(wrap);
+          });
+          p.threads.filter(function (t) { return t.path === file.path; }).forEach(function (t) {
+            var row = rows.find(function (r) { return +r.dataset.n === t.line; });
+            var note = document.createElement('div'); note.className = 'pr-inline pr-existing'; note.textContent = (t.resolved ? 'Resolved' : 'Unresolved') + ' thread: ' + plain(t.comments.map(function (c) { return c.html; }).join(' '));
+            if (row) row.after(note); else det.appendChild(note);
+          });
+          bindPrActions(p, det);
+        } });
+      }
+      if (window.REVIEW_DIFFS && Object.prototype.hasOwnProperty.call(window.REVIEW_DIFFS, p.diff.key)) return fill();
+      var script = document.createElement('script'); script.src = p.diff.src; script.onload = fill; script.onerror = function () { box.textContent = 'Diff could not be loaded.'; }; document.head.appendChild(script);
+    }
+    function prDialog(title, html, submitLabel, onSubmit) {
+      var prior = document.activeElement, dialog = document.createElement('dialog'); dialog.className = 'pr-dialog'; dialog.setAttribute('aria-label', title);
+      dialog.innerHTML = '<form method="dialog"><h2>' + esc(title) + '</h2>' + html + '<div class="pr-actions"><button type="button" class="btn" data-cancel>Cancel</button><button class="btn primary" type="submit">' + esc(submitLabel || 'Save') + '</button></div><p class="pr-dialog-error" role="alert"></p></form>';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('close', function () { dialog.remove(); if (prior && document.contains(prior)) prior.focus(); else focusView(); });
+      dialog.querySelector('[data-cancel]').onclick = function () { dialog.close(); };
+      dialog.querySelector('form').onsubmit = async function (e) { e.preventDefault(); var btn = dialog.querySelector('[type=submit]'); btn.disabled = true; try { await onSubmit(new FormData(e.target)); dialog.close(); } catch (err) { dialog.querySelector('[role=alert]').textContent = err.message; btn.disabled = false; } };
+      dialog.showModal();
+      return dialog;
+    }
+    function field(name, label, value, multiline) { return '<label>' + label + (multiline ? '<textarea rows="5"' : '<input') + ' name="' + name + '"' + (multiline ? '>' + esc(value || '') + '</textarea>' : ' value="' + esc(value == null ? '' : value) + '">') + '</label>'; }
+    function quote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+    async function copyCommand(command) {
+      if (!command) throw new Error('No command is available for this action.');
+      try { await navigator.clipboard.writeText(command); }
+      catch (err) {
+        var ta = document.createElement('textarea'); ta.value = command; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+        var ok = false; try { ok = document.execCommand('copy'); } finally { ta.remove(); }
+        if (!ok) throw new Error('Copy failed. Select and copy this command:\n' + command);
+      }
+      var announce = document.getElementById('rk-live'); if (announce) announce.textContent = 'Copied: ' + command;
+      prToast('Command copied');
+    }
+    async function prApi(action, p, args) {
+      if (prBusy) throw new Error('An action is already running.');
+      var active = document.activeElement, focus = active && active.dataset.prAction ? { action: active.dataset.prAction, finding: active.dataset.finding, thread: active.dataset.thread, scope: active.closest('#pr-findings') ? '#pr-findings' : active.closest('#pr-diff') ? '#pr-diff' : '#app' } : null;
+      prBusy = true; document.body.classList.add('pr-busy'); prToast('Working…');
+      try {
+        var response = await fetch('/api/prs/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Review-Kit-Token': session.token }, body: JSON.stringify(Object.assign({ review: key || 'prs', id: p ? p.id : undefined }, args || {})) });
+        var result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.error || 'Action failed');
+        if (result.prs && !(action === 'ship' && args && args.dryRun)) { PRS = D.prs = result.prs; route(lastParts);
+          if (focus) { var scope = document.querySelector(focus.scope) || app; var target = Array.from(scope.querySelectorAll('[data-pr-action]')).find(function (b) { return b.dataset.prAction === focus.action && b.dataset.finding === focus.finding && b.dataset.thread === focus.thread; }); if (target) target.focus({ preventScroll: true }); else focusView(); }
+        }
+        version = result.built || version; prToast(result.message); return result;
+      } finally { prBusy = false; document.body.classList.remove('pr-busy'); }
+    }
+    function localPlan(p) {
+      var flagged = p.findings.filter(function (f) { return f.ship && f.status === 'draft'; }), v = p.verdict || { event: 'COMMENT', text: '' };
+      if (!flagged.length && !v.text.trim()) throw new Error('Flag findings or write a verdict body first.');
+      if (v.event !== 'COMMENT' && p.viewer && p.viewer.toLowerCase() === p.author.toLowerCase()) throw new Error('You cannot approve or request changes on your own PR.');
+      var files = parseDiff(p.diff && window.REVIEW_DIFFS ? window.REVIEW_DIFFS[p.diff.key] || '' : ''), comments = [], body = [v.text || ''];
+      flagged.forEach(function (f) {
+        var file = files.find(function (x) { return x.path === f.path; }), col = f.side === 'LEFT' ? 'o' : 'n';
+        var valid = file && f.line && file.rows.some(function (r) { return r[col] === f.line; }) && (!f.startLine || file.rows.some(function (r) { return r[col] === f.startLine; }));
+        var text = f.text + (f.stale ? '\n\n_(Written against ' + f.sha.slice(0, 7) + '; the code may have changed since.)_' : '');
+        if (valid && !f.stale) { var c = { path: f.path, line: f.line, side: f.side, body: text }; if (f.startLine) { c.start_line = f.startLine; c.start_side = f.side; } comments.push(c); }
+        else body.push((f.path ? '**`' + f.path + '`' + (f.line ? ' line ' + (f.startLine ? f.startLine + '-' : '') + f.line : '') + '** (' + (f.stale ? 'the head commit changed; re-check this location' : !file ? 'the file is not in the diff' : !f.line ? 'a file-level comment' : 'that line is not in the diff') + '):\n\n' : '') + text);
+      });
+      var payload = { commit_id: p.headSha, event: v.event }; var text = body.filter(Boolean).join('\n\n---\n\n'); if (text) payload.body = text; if (comments.length) payload.comments = comments;
+      return payload;
+    }
+    function shipCommand(p, payload) { return 'gh api repos/' + p.repo + '/pulls/' + p.number + "/reviews -X POST --input - <<'RK_REVIEW'\n" + JSON.stringify(payload, null, 2) + '\nRK_REVIEW'; }
+    async function shipDialog(p) {
+      try {
+        var payload = live ? (await prApi('ship', p, { dryRun: true })).payload : localPlan(p);
+        prDialog('Preview review — ' + p.repo + '#' + p.number, '<p>One GitHub review will be posted. Check every comment and its location below.</p><pre class="pr-preview">' + esc(JSON.stringify(payload, null, 2)) + '</pre>', live ? 'Send review' : 'Copy gh command', async function () { if (live) await prApi('ship', p, { expectedPayload: payload }); else await copyCommand(shipCommand(p, payload)); });
+      } catch (err) { prToast(err.message); }
+    }
+    function findingDialog(p, id, location) {
+      var f = p.findings.find(function (f) { return f.id === id; }) || location || {};
+      prDialog(id ? 'Edit finding' : 'Draft finding', field('title', 'Title', f.title) + field('body', 'Exact text to post', f.text, true) + field('path', 'File (optional)', f.path) + field('line', 'Line (optional)', f.line) + field('startLine', 'Start line (optional)', f.startLine) + '<label>Side<select name="side"><option>RIGHT</option><option' + (f.side === 'LEFT' ? ' selected' : '') + '>LEFT</option></select></label><label>Severity<select name="severity">' + ['P0', 'P1', 'P2', 'nit'].map(function (s) { return '<option' + (s === (f.severity || 'P1') ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></label>', 'Save draft', async function (form) {
+        var args = Object.fromEntries(form); args.line = args.line ? +args.line : null; args.startLine = args.startLine ? +args.startLine : null; if (id) args.finding = id;
+        if (live) await prApi('finding', p, args);
+        else { if (!args.title.trim() || !args.body.trim()) throw new Error('Title and body are required.'); Object.assign(f, args, { id: id || 'local-' + Date.now(), text: args.body, html: '<p>' + esc(args.body) + '</p>', status: 'draft', sha: p.headSha, stale: false }); if (!id) p.findings.push(f); viewPr([p.id]); }
+      });
+    }
+    function bindPrActions(p, root) {
+      (root || app).querySelectorAll('[data-copy]').forEach(function (b) { b.onclick = function () { copyText(b); }; });
+      (root || app).querySelectorAll('[data-pr-action]').forEach(function (b) { b.onclick = async function () {
+        var action = b.dataset.prAction, fid = b.dataset.finding, tid = b.dataset.thread, args = {};
+        var t = p && p.threads.find(function (t) { return t.id === tid; });
+        try {
+          if (action === 'ship') return shipDialog(p);
+          if (action === 'finding') return findingDialog(p, fid);
+          if (action === 'flag' || action === 'drop') {
+            var f = p.findings.find(function (f) { return f.id === fid; });
+            args = action === 'flag' ? { findings: [fid], ship: !f.ship } : { finding: fid };
+            if (live) await prApi(action, p, args); else { if (action === 'flag') f.ship = !f.ship; else { f.ship = false; f.status = 'dropped'; } viewPr([p.id]); } return;
+          }
+          if (action === 'verdict') return prDialog('Draft verdict', '<label>Verdict<select name="event">' + ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].map(function (ev) { return '<option' + (p.verdict && p.verdict.event === ev ? ' selected' : '') + '>' + ev + '</option>'; }).join('') + '</select></label>' + field('body', 'Review summary', p.verdict && p.verdict.text, true), 'Save verdict', async function (form) { var a = Object.fromEntries(form); if (live) await prApi('verdict', p, a); else { p.verdict = { event: a.event, text: a.body }; viewPr([p.id]); } });
+          if (action === 'set') return prDialog('Notes / Next', field('next', 'Next step', p.next) + field('notes', 'Notes', p.notesText, true) + field('priority', 'Priority', p.priority), 'Save', async function (form) { var a = Object.fromEntries(form); a.priority = a.priority ? +a.priority : null; await prApi('set', p, a); });
+          if (action === 'comment' || action === 'reply' || action === 'request') return prDialog(action === 'request' ? 'Request reviewers' : action === 'reply' ? 'Reply to thread' : 'Comment on PR', field('body', action === 'request' ? 'Reviewers (comma separated)' : 'Message', '', action !== 'request'), live ? 'Send' : 'Copy command', async function (form) { var text = form.get('body'); if (!text.trim()) throw new Error('Enter text first.'); var a = action === 'request' ? { reviewers: text.split(',').map(function (s) { return s.trim(); }).filter(Boolean) } : { body: text }; if (tid) a.thread = tid; if (live) await prApi(action, p, a); else await copyCommand((t ? t.commands.reply : p.commands[action]).replace('{body}', quote(text)).replace('{reviewers}', quote(text))); });
+          if (action === 'resolve') args = { thread: tid, unresolve: t.resolved };
+          if (action === 'ready') args = { undo: !p.draft };
+          function command(method) { if (!p) return PRS.filter(function (p) { return p.state === 'OPEN'; }).map(function (p) { return 'gh pr view ' + p.number + ' -R ' + p.repo + ' --json title,state,statusCheckRollup,reviews'; }).join('\n'); if (action === 'sync') return 'gh pr view ' + p.number + ' -R ' + p.repo + ' --json title,state,statusCheckRollup,reviews'; if (t) return t.commands[t.resolved ? 'unresolve' : 'resolve']; if (action === 'ready') return p.commands[p.draft ? 'ready' : 'undoReady']; return p.commands[action === 'update-branch' ? 'updateBranch' : action === 'merge' ? method === 'merge' ? 'mergeMerge' : method === 'rebase' ? 'mergeRebase' : 'merge' : action]; }
+          if (['merge', 'close', 'update-branch', 'rerun'].includes(action)) {
+            var dlg = prDialog('Confirm ' + action, (action === 'merge' ? '<label>Merge method<select name="method"><option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option></select></label>' : '') + '<p>' + (live ? 'This command will run:' : 'Copy and run this command:') + '</p><pre class="pr-preview">' + esc(command('squash')) + '</pre>', live ? 'Confirm' : 'Copy command', async function (form) { if (action === 'merge') args.method = form.get('method'); if (live) await prApi(action, p, args); else await copyCommand(command(args.method)); });
+            if (action === 'merge') dlg.querySelector('select').onchange = function (e) { dlg.querySelector('pre').textContent = command(e.target.value); };
+            return;
+          }
+          if (live) await prApi(action, p, args); else await copyCommand(command());
+        } catch (err) { prToast(err.message); }
+      }; });
+    }
+    if (KIND === 'prs') {
+      document.addEventListener('keydown', function (e) {
+        if (shown && shown.P !== P || document.querySelector('dialog[open]') || e.altKey || e.metaKey || e.ctrlKey || e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+        var list = visiblePrs(), at = list.findIndex(function (p) { return p.id === prSelected; }), p = list[at];
+        if (e.key === 'j' || e.key === 'k') { e.preventDefault(); var next = list[Math.max(0, Math.min(list.length - 1, at + (e.key === 'j' ? 1 : -1)))]; if (next) location.hash = prHref(next); }
+        else if (e.key === 'o' && p) window.open(safeHref(p.url), '_blank', 'noopener');
+        else if (e.key === 's' && live) { e.preventDefault(); prApi('sync', p).catch(function (err) { prToast(err.message); }); }
+        else if (e.key === '?') prDialog('Keyboard shortcuts', '<p>j / k — Next / previous PR<br>o — Open on GitHub<br>s — Sync in live mode<br>? — Shortcuts</p>', 'Close', function () {});
+      });
+      var meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+      if (/^https?:$/.test(location.protocol) && meta && meta.content.includes("connect-src 'self'")) {
+        fetch('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+          if (!s.actions) return;
+          session = s; live = true; if (!COMBINED || shown && shown.P === P) route(lastParts);
+          fetch('/api/version').then(function (r) { return r.json(); }).then(function (v) { version = v.built; }).catch(function () {});
+          setInterval(function () { fetch('/api/version').then(function (r) { return r.json(); }).then(function (v) {
+            if (version && v.built > version && !document.getElementById('pr-updated')) { var bar = document.createElement('div'); bar.id = 'pr-updated'; bar.setAttribute('role', 'status'); bar.className = 'pr-updated'; bar.innerHTML = 'Updated — <button class="btn">Reload</button>'; bar.querySelector('button').onclick = function () { location.reload(); }; document.body.appendChild(bar); }
+          }).catch(function () {}); }, 20000);
+        }).catch(function () {});
+      }
+    }
+
     // ------------------------------------------------------------ tabs / routing
     // the kind decides the order: an ideas review leads with Ideas and Research, a design review with Proposals
-    var ORDER = KIND === 'ideas' ? ['overview', 'ideas', 'research', 'proposals', 'fixes', 'issues', 'plan']
+    var ORDER = KIND === 'prs' ? ['overview'] : KIND === 'ideas' ? ['overview', 'ideas', 'research', 'proposals', 'fixes', 'issues', 'plan']
       : KIND === 'design' ? ['overview', 'proposals', 'ideas', 'research', 'fixes', 'issues', 'plan']
         : ['overview', 'fixes', 'issues', 'ideas', 'research', 'proposals', 'plan'];
-    var VDEF = { overview: ['Overview', '◎'], fixes: ['Fixes', '✓'], issues: ['Issues', '☰'], plan: ['Plan', '▤'], ideas: ['Ideas', '✦'], research: ['Research', '❞'], proposals: ['Proposals', '⇆'] };
+    var VDEF = { overview: [KIND === 'prs' ? 'PRs' : 'Overview', '◎'], fixes: ['Fixes', '✓'], issues: ['Issues', '☰'], plan: ['Plan', '▤'], ideas: ['Ideas', '✦'], research: ['Research', '❞'], proposals: ['Proposals', '⇆'] };
     var VIEWS = ORDER.map(function (v) { return [v, VDEF[v][0], VDEF[v][1]]; }).filter(function (v) {
       return v[0] === 'overview' || (v[0] === 'fixes' && D.fixes.length) || (v[0] === 'issues' && ALL.length) || (v[0] === 'plan' && (D.plan.length || D.appendix.length)) ||
         (v[0] === 'ideas' && IDEAS.length) || (v[0] === 'research' && RESEARCH.length) || (v[0] === 'proposals' && PROPS.length);
@@ -123,10 +357,13 @@
       document.getElementById('tabs-bottom').innerHTML = VIEWS.length > 1 ? VIEWS.map(function (v) { return link(v, true); }).join('') : '';
     }
     function route(parts) {
-      var view = VIEWS.some(function (v) { return v[0] === parts[0]; }) ? parts[0] : 'overview';
+      if (KIND === 'prs' && !key && parts[0] === 'prs') parts = parts.slice(1); // #/prs/pr/<id> works in a single-review site too
+      lastParts = parts;
+      var view = VIEWS.some(function (v) { return v[0] === parts[0]; }) || (KIND === 'prs' && parts[0] === 'pr') ? parts[0] : 'overview';
       current = view;
       document.body.classList.toggle('no-bottom', VIEWS.length < 2);
-      renderTabs(view);
+      renderTabs(view === 'pr' ? 'overview' : view);
+      if (KIND === 'prs') return view === 'pr' ? viewPr(parts.slice(1).map(decodeURIComponent)) : viewBoard();
       ({ overview: viewOverview, fixes: viewFixes, issues: viewIssues, plan: viewPlan, ideas: viewIdeas, research: viewResearch, proposals: viewProposals })[view](parts.slice(1).map(decodeURIComponent));
     }
 
@@ -845,7 +1082,10 @@
           (d.text ? '<details class="diffbox"><summary>Show the diff</summary><div class="diffv"></div></details>' : '') : missing('No diff recorded')) +
         '<div class="cmds">' + cmds + '</div></article>';
     }
-    function renderDiff(box, text, truncated) { // text is shown with textContent only, never parsed as HTML
+    // Diff viewer. Text is shown with textContent only, never parsed as HTML. opts (PR pages): lines adds data-o / data-n
+    // (old / new line numbers) to each line, lazy fills a collapsed file only when it is opened, onFile(det, file) runs
+    // once a file's lines exist, and open(file, i) decides which files start open (default: the first four).
+    function parseDiff(text) {
       var files = [], cur = null;
       var lines = String(text).split('\n');
       if (lines.length && lines[lines.length - 1] === '') lines.pop();
@@ -858,41 +1098,70 @@
         }
         cur.lines.push(line);
       });
+      files.forEach(function (f) {
+        var o = 0, n = 0, inHunk = false;
+        f.rows = f.lines.map(function (l) {
+          var c = /^(\+\+\+|---) /.test(l) && !inHunk || /^(diff |index |new file|deleted file|similarity|rename |old mode|new mode|Binary files)/.test(l) ? 'm' : /^@@/.test(l) ? 'h' : l.charAt(0) === '+' ? 'a' : l.charAt(0) === '-' ? 'd' : 'c';
+          var row = { t: l, c: c };
+          if (c === 'h') { var h = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(l); if (h) { o = +h[1]; n = +h[2]; inHunk = true; } }
+          else if (c === 'm') inHunk = false;
+          else if (inHunk && c === 'a') { row.n = n++; f.add++; }
+          else if (inHunk && c === 'd') { row.o = o++; f.del++; }
+          else if (inHunk && l.charAt(0) !== '\\') { row.o = o++; row.n = n++; }
+          else if (c === 'a') f.add++; else if (c === 'd') f.del++;
+          return row;
+        });
+      });
+      return files;
+    }
+    function renderDiff(box, text, truncated, opts) {
+      opts = opts || {};
+      var files = parseDiff(text);
       files.forEach(function (f, i) {
         var det = document.createElement('details');
         det.className = 'dfile';
-        if (i < 4) det.open = true;
+        det.setAttribute('data-path', f.path);
+        det.open = opts.open ? !!opts.open(f, i) : i < 4;
         var sum = document.createElement('summary');
         var pre = document.createElement('pre'), inner = document.createElement('div');
         pre.className = 'dl'; inner.className = 'dli';
         pre.appendChild(inner);
-        f.lines.forEach(function (l) {
-          var s = document.createElement('span');
-          var c = /^(\+\+\+|---) /.test(l) || /^(diff |index |new file|deleted file|similarity|rename |old mode|new mode|Binary files)/.test(l) ? 'm' : l.charAt(0) === '+' ? 'a' : l.charAt(0) === '-' ? 'd' : /^@@/.test(l) ? 'h' : 'c';
-          if (c === 'a') f.add++; else if (c === 'd') f.del++;
-          s.className = c;
-          s.textContent = l;
-          inner.appendChild(s);
-        });
+        function fill() {
+          if (det.filled) return;
+          det.filled = true;
+          f.rows.forEach(function (r) {
+            var s = document.createElement('span');
+            s.className = r.c;
+            s.textContent = r.t;
+            if (opts.lines) { if (r.o != null) s.setAttribute('data-o', r.o); if (r.n != null) s.setAttribute('data-n', r.n); }
+            inner.appendChild(s);
+          });
+          if (opts.onFile) opts.onFile(det, f);
+        }
         var code = document.createElement('code'); code.textContent = f.path;
         var cnt = document.createElement('span'); cnt.className = 'small'; cnt.textContent = ' +' + f.add + ' −' + f.del;
         sum.appendChild(code); sum.appendChild(cnt);
         det.appendChild(sum); det.appendChild(pre);
         box.appendChild(det);
+        if (!opts.lazy || det.open) fill();
+        else det.addEventListener('toggle', function () { if (det.open) fill(); });
+        det.fill = fill;
       });
       if (truncated) {
         var p = document.createElement('p'); p.className = 'missing';
-        p.textContent = 'This diff was cut short because it is large. Switch to the branch to see all of it.';
+        p.textContent = opts.truncatedText || 'This diff was cut short because it is large. Switch to the branch to see all of it.';
         box.appendChild(p);
       }
+      return files;
     }
     function copyText(btn) {
       var txt = btn.getAttribute('data-copy');
       function done(ok) {
         btn.textContent = ok ? 'Copied' : 'Select and copy';
         var live = document.getElementById('rk-live'); if (live) live.textContent = ok ? 'Copied: ' + txt : 'Copy failed. Select the command and copy it.';
-        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
-        if (!ok) { var r = document.createRange(); r.selectNodeContents(btn.parentNode.querySelector('code')); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+        setTimeout(function () { btn.textContent = btn.getAttribute('data-label') || 'Copy'; }, 2000);
+        var codeEl = btn.parentNode.querySelector('code');
+        if (!ok && codeEl) { var r = document.createRange(); r.selectNodeContents(codeEl); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
       }
       function fallback() {
         var ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
@@ -985,7 +1254,9 @@
     // a card for the combined landing page, with numbers that fit the kind
     function card(label) {
       var acc = P.theme.accent, body;
-      if (KIND === 'ideas' || (KIND === 'design' && !PROPS.length && IDEAS.length)) {
+      if (KIND === 'prs') {
+        body = '<p class="small">' + PRS.length + ' pull requests across ' + new Set(PRS.map(function (p) { return p.repo; })).size + ' repositories</p>' + tiles([[PRS.filter(function (p) { return p.group === 'action'; }).length, 'Need you', 'open'], [PRS.filter(function (p) { return p.group === 'ready'; }).length, 'Ready', 'fixed'], [PRS.filter(function (p) { return p.role === 'reviewing'; }).length, 'Reviewing', 'partial']]);
+      } else if (KIND === 'ideas' || (KIND === 'design' && !PROPS.length && IDEAS.length)) {
         var n = ideaCounts();
         body = '<div class="small">' + [IDEAS.length + ' idea' + (IDEAS.length === 1 ? '' : 's'), RESEARCH.length + ' research finding' + (RESEARCH.length === 1 ? '' : 's'), 'updated ' + esc(D.generated)].join(' · ') + '</div>' +
           tiles([[n.go, 'Go', 'fixed'], [n.maybe, 'Maybe', 'partial'], [n.proposed, 'Proposed', 'open']]);

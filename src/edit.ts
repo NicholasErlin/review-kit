@@ -50,6 +50,7 @@ export function init(directory: string, name: string, title = 'Review', platform
   if (kind) data.project.kind = kind;
   if (kind === 'ideas') Object.assign(data, { research: [], ideas: [] });
   if (kind === 'design') data.proposals = [];
+  if (kind === 'prs') data.prs = [];
   if (accent) data.project.theme = { accent };
   model.save(path, data);
   for (const sub of ['screenshots', 'pending']) {

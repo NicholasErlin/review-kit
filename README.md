@@ -209,6 +209,7 @@ Each review kind has its own playbook next to `SKILL.md`. Each playbook leans on
 | `ui` | [ui-review.md](skill/review-kit/ui-review.md) | `ui-ux-pro-max`: searchable UX rules (accessibility, touch, layout, type, forms, navigation) to cite and rank findings | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) (MIT) |
 | `backend` | [backend-review.md](skill/review-kit/backend-review.md) | `api-design-principles`, `architecture-patterns`, `error-handling-patterns` | [wshobson/agents](https://github.com/wshobson/agents) (MIT) |
 | `ideas` | [ideas-review.md](skill/review-kit/ideas-review.md) | none required | |
+| `prs` | [prs-review.md](skill/review-kit/prs-review.md) | none required; uses gh | |
 | `design` | [design-review.md](skill/review-kit/design-review.md) | `ui-ux-pro-max` for UI options; the three backend skills for API or architecture options | as above |
 
 ```bash
@@ -220,6 +221,21 @@ review-kit companions install --kind ui --skills-dir ~/.agents/skills
 - Agents read the bundled copies through `review-kit companions` even when the skills aren't installed. `install` (or `review-kit setup --with-companions`) only makes them load as skills in their own right.
 - An install never replaces a skill you already have; it only reports it. If you installed the same skill another way, for example as a Claude Code plugin, `review-kit companions` uses that copy.
 - To move to newer upstream versions, bump the commit hashes in `src/companions.ts`, rebuild, run `review-kit companions update`, and review the diff.
+
+## Pull requests across repositories
+
+`prs` adds a dashboard for PRs you own and PRs you review:
+
+```sh
+review-kit init .review/prs --kind prs --name "My PRs"
+review-kit pr add --mine
+review-kit pr add --requested
+review-kit serve prs --sync-prs 5
+```
+
+See what blocks merging, read checks, conversation and diffs, and record a next step. For others' PRs, draft findings, flag only the ones you want to send, then preview and post them together as one GitHub review. Localhost has live actions; offline and LAN pages provide copyable `gh` commands. Requires an authenticated GitHub CLI. No new runtime dependencies; Node 18+.
+
+[PR workflow](docs/workflow.md#pull-request-dashboard) · [Data format](docs/format.md#pull-request-reviews-projectkind-prs) · [Agent playbook](skill/review-kit/prs-review.md) · [Fictional example](examples/prs/review.json)
 
 ## License
 

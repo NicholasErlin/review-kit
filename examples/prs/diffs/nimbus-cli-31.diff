@@ -1,0 +1,37 @@
+diff --git a/cmd/nimbus/config.go b/cmd/nimbus/config.go
+index 5a6b7c8..9d0e1f2 100644
+--- a/cmd/nimbus/config.go
++++ b/cmd/nimbus/config.go
+@@ -22,11 +22,18 @@ func configPath() (string, error) {
+-	home, err := os.UserHomeDir()
+-	if err != nil {
+-		return "", err
++	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
++		return filepath.Join(dir, "nimbus", "config.toml"), nil
++	}
++	dir, err := os.UserConfigDir()
++	if err != nil {
++		return "", fmt.Errorf("find config dir: %w", err)
+ 	}
+-	return filepath.Join(home, ".nimbus.toml"), nil
++	return filepath.Join(dir, "nimbus", "config.toml"), nil
+ }
+diff --git a/cmd/nimbus/config_test.go b/cmd/nimbus/config_test.go
+index 3c4d5e6..7f8a9b0 100644
+--- a/cmd/nimbus/config_test.go
++++ b/cmd/nimbus/config_test.go
+@@ -9,3 +9,13 @@ func TestConfigPathDefault(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ }
++
++func TestConfigPathXDG(t *testing.T) {
++	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
++	got, err := configPath()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if want := "/tmp/xdg/nimbus/config.toml"; got != want {
++		t.Fatalf("got %q, want %q", got, want)
++	}
++}

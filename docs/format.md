@@ -139,3 +139,15 @@ Each option:
 - The merged result must validate. If it does not, `review.json` is left unchanged and the file is not renamed.
 
 [workflow.md](workflow.md) describes how to use the envelope with parallel agents.
+
+## Pull request reviews (`project.kind: "prs"`)
+
+The `prs` array holds PRs from any GitHub repositories. Each has `id` (lowercase owner-repo-number slug), `repo` (`owner/name`), `number`, `url`, optional `role` (`mine`, default, or `reviewing`) and `added` (ISO timestamp). User-owned fields are `priority` (integer, lower first), `next` (plain text), `notes` (Markdown), `dependsOn` (PR ids), `findings` and `verdict`. Sync never overwrites these fields.
+
+`gh` is replaced on sync: fetched timestamp, title/body, state/draft, author/viewer, head/base/headSha, created/updated/mergedAt, mergeable/mergeState/reviewDecision, additions/deletions/changedFiles, labels/reviewRequests, checks, reviews, threads, comments and files. Check entries have name/workflow/status/conclusion/url and a GitHub Actions runId when available. Reviews include their commit SHA for detecting new commits. Threads have id/path/line/resolved/outdated and comments. `gh.diff` is a review-relative `diffs/<id>.diff` path, capped at 2 MB; `diffTruncated` discloses truncation. Never store absolute asset paths.
+
+Mine groups: action, ready, waiting, draft, merged, closed. Reviewing groups: to-review, in-review, to-ship, waiting-author, updated, done. Groups, blockers and sync age are derived by the shared `src/prs.ts` helpers, not stored. Entries sort by group, priority, then latest update. Validation warns on unknown dependencies, duplicate repo/number, missing sync and open PR snapshots older than 24 hours.
+
+A finding has unique `id`, `severity` (P0/P1/P2/nit, default P1), `title`, exact Markdown `body`, optional repository-relative `path`, `line`, `side` (RIGHT/LEFT), `startLine`, recorded `sha`, `ship` (default false), and `status` (draft/posted/dropped). Posted metadata has at/url/reviewId/sha. Build derives `stale` when a draft's SHA differs from the synced head. Stale and absent diff locations move into the review body with an explanatory note. `verdict` has event (COMMENT/APPROVE/REQUEST_CHANGES) and a Markdown summary body. One ship operation posts all flagged draft findings and the verdict, then marks those findings posted and clears the verdict.
+
+See [the example](../examples/prs/review.json), [workflow](workflow.md#pull-request-dashboard) and [playbook](../skill/review-kit/prs-review.md).

@@ -7,6 +7,7 @@
  */
 import { ReviewError } from './errors.js';
 import * as model from './model.js';
+import * as prs from './prs.js';
 import { get, has, isabs, isDict, isInt, isfile, numStr, pyEq, pyLen, pySlice, repr, str, strip, truthy, typeName } from './py.js';
 import * as safety from './safety.js';
 
@@ -220,6 +221,8 @@ export function semantic(data: any, base: string, checkFiles = true): [string[],
     }
   }
   ideasAndDesigns(data, base, checkFiles, platOk, links, errors, warnings);
+  dupes(get(data, 'prs') || [], 'PR', errors);
+  prs.semantic(data, base, checkFiles, errors, warnings);
   for (const [where, link] of links) {
     const href = link.href;
     if (safety.safeUrl(href) !== href) {

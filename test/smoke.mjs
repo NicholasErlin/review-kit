@@ -549,7 +549,135 @@ async function ideasDesign(name, viewport, colorScheme = 'light') {
   await ctx2.close();
 }
 
+async function prsPages() {
+  console.log('PRs: offline pages at both sizes; live API click-through with fake gh');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rk-smoke-prs-'));
+  const example = path.join(ROOT, 'examples/prs');
+  const offline = path.join(tmp, 'offline'), liveDir = path.join(tmp, 'live');
+  for (const dir of [offline, liveDir]) fs.cpSync(example, dir, { recursive: true, filter: (p) => path.basename(p) !== 'site' });
+  execFileSync(process.execPath, [CLI, 'build', offline], { stdio: 'inherit' });
+  const fixture = path.join(liveDir, 'review.json'), log = path.join(SHOTS, 'prs-live-gh.jsonl');
+  fs.writeFileSync(log, '');
+  const fakeEnv = { ...process.env, REVIEW_KIT_GH: path.join(ROOT, 'test/fake-gh.mjs'), REVIEW_KIT_GH_DATA: fixture, REVIEW_KIT_GH_LOG: log };
+  const child = spawn(process.execPath, [CLI, 'serve', liveDir, '--port', '0'], { cwd: ROOT, env: fakeEnv, stdio: ['ignore', 'pipe', 'inherit'] });
+  servers.push(child);
+  const liveBase = await new Promise((resolve, reject) => { let text = ''; const timeout = setTimeout(() => reject(new Error('PR server did not start')), 10000); child.stdout.on('data', (d) => { text += d; const m = text.match(/local:\s+(http:\/\/\S+)/); if (m) { clearTimeout(timeout); resolve(m[1]); } }); child.on('exit', (code) => reject(new Error('PR server exited ' + code))); });
+  try {
+    const combo = path.join(tmp, 'combined');
+    fs.cpSync(offline, path.join(combo, '.review/prs'), { recursive: true, filter: (p) => path.basename(p) !== 'site' });
+    fs.cpSync(DEMO, path.join(combo, '.review/ui'), { recursive: true, filter: (p) => path.basename(p) !== 'site' });
+    execFileSync(process.execPath, [CLI, 'build'], { cwd: combo, stdio: 'inherit' });
+    const comboUrl = pathToFileURL(path.join(combo, '.review/site/index.html')).href;
+    const combinedPage = await browser.newPage({ viewport: { width: 412, height: 915 } });
+    await combinedPage.goto(comboUrl);
+    check((await combinedPage.locator('#review-switch a').allInnerTexts()).join('|') === 'All|PRs|UI/UX', 'combined site orders PRs first');
+    check((await combinedPage.locator('.rv-card').first().innerText()).includes('9 pull requests'), 'PR landing card counts PRs');
+    await combinedPage.locator('#review-switch a', { hasText: 'PRs' }).click();
+    await combinedPage.locator('a[href$="pr/acme-web-150"]').click();
+    await combinedPage.waitForSelector('#pr-diff .pr-finding');
+    check(combinedPage.url().endsWith('#/prs/pr/acme-web-150'), 'combined reviewing deep link');
+    check(await combinedPage.locator('.pr-shipbar').isVisible(), 'combined PR assets and ship bar work');
+    await combinedPage.close();
+    for (const [name, viewport] of [['mobile', { width: 412, height: 915 }], ['desktop', { width: 1440, height: 900 }]]) {
+      const ctx = await browser.newContext({ viewport, colorScheme: 'light', permissions: ['clipboard-read', 'clipboard-write'] }), page = await ctx.newPage(), errors = [], fetches = [];
+      page.on('pageerror', (e) => errors.push(String(e)));
+      page.on('request', (r) => { if (r.resourceType() === 'fetch') fetches.push(r.url()); });
+      const offlineBase = pathToFileURL(path.join(offline, 'site/index.html')).href;
+      const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+      const shot = (label, fullPage = true) => page.screenshot({ path: path.join(SHOTS, 'prs-' + name + '-' + label + '.png'), fullPage });
+      await page.goto(offlineBase + '#/prs');
+      await page.waitForSelector('.pr-card');
+      check(await page.locator('.pr-card').count() === 9, 'PR board lists all 9 PRs');
+      check(await page.locator('.pr-group:not(details)').count() === 7, 'PR board renders both role groups');
+      check(await overflow() <= 0, 'PR board has no overflow');
+      await shot('board');
+      await page.locator('[data-role=reviewing]').click();
+      check(await page.locator('.pr-card').count() === 3, 'Reviewing role filters board');
+      await page.locator('[data-role=all]').click();
+      await page.locator('[data-repo="acme/web"]').click();
+      check(await page.locator('.pr-card').count() === 3, 'repository filter');
+      await page.locator('[data-repo=""]').click();
+      await page.locator('#pr-search').fill('Coupons in the cart');
+      check(await page.locator('.pr-card').count() === 1, 'PR text search');
+      await page.locator('#pr-search').fill('');
+      await page.locator('a[href$="pr/acme-web-142"]').click();
+      await page.waitForSelector('#pr-diff .dfile');
+      check((await page.locator('.pr-blockers').innerText()).includes('2 checks failing'), 'mine PR shows blockers');
+      await shot('mine');
+      check(await overflow() <= 0, 'mine PR has no overflow');
+      await page.locator('[data-jump-threads]').click();
+      check(page.url().endsWith('/pr/acme-web-142'), 'thread jump keeps route');
+      await page.goto(offlineBase + '#/prs/pr/acme-web-150');
+      await page.waitForSelector('#pr-diff .pr-finding');
+      check(await page.locator('.pr-shipbar').isVisible(), 'reviewing has sticky ship bar');
+      check(await page.locator('#pr-diff .pr-finding').count() >= 2, 'findings appear in the diff');
+      check(await overflow() <= 0, 'reviewing PR has no page overflow');
+      await shot('reviewing');
+      await page.locator('#pr-diff .pr-finding').first().scrollIntoViewIfNeeded();
+      check(await page.locator('#pr-diff .pr-inline').first().evaluate((e) => e.getBoundingClientRect().width <= document.getElementById('pr-diff').clientWidth), 'inline finding fits diff viewport');
+      check(await page.locator('#pr-diff .pr-finding .rich').first().evaluate((e) => e.scrollWidth <= e.clientWidth), 'inline finding prose wraps');
+      await shot('reviewing-findings', false);
+      await page.locator('.pr-shipbar [data-pr-action=ship]').click();
+      await page.waitForSelector('dialog[open]');
+      const json = await page.locator('dialog pre').innerText();
+      check(json.includes('REQUEST_CHANGES') && json.includes('src/cart/applyCoupon.ts'), 'offline review preview contains exact verdict and comments');
+      await page.locator('dialog button[type=submit]').click();
+      check((await page.evaluate(() => navigator.clipboard.readText())).includes('gh api repos/acme/web/pulls/150/reviews -X POST --input -'), 'offline review command is copied with its JSON');
+      await page.keyboard.press('?'); check(await page.locator('dialog[open]').count() === 1, 'keyboard help opens'); await page.keyboard.press('Escape');
+      check(fetches.length === 0, 'offline PR pages never fetch');
+      check(errors.length === 0, 'offline PR pages have no JS errors: ' + errors.join(' | '));
+      await ctx.close();
+    }
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }), page = await ctx.newPage(), errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(liveBase + '#/prs');
+    await page.waitForFunction(() => document.body.innerText.includes('Live actions on localhost'));
+    await page.evaluate(() => { window.prTestMarker = 'no reload'; });
+    async function act(action, click) { const response = page.waitForResponse((r) => r.url().endsWith('/api/prs/' + action) && r.request().method() === 'POST'); await click(); const r = await response; const data = await r.json(); check(r.ok() && data.ok, 'live ' + action + ' succeeds: ' + (data.error || '')); await page.waitForFunction(() => !document.body.classList.contains('pr-busy')); return data; }
+    await act('sync', () => page.getByRole('button', { name: 'Sync all', exact: true }).click());
+    await page.locator('a[href$="pr/acme-web-142"]').click();
+    await page.getByRole('button', { name: 'Comment', exact: true }).click();
+    await page.locator('dialog textarea').fill('Smoke: a fixture-only comment.');
+    await act('comment', () => page.locator('dialog button[type=submit]').click());
+    check((await page.locator('.pr-section').allInnerTexts()).some((t) => t.includes('Smoke: a fixture-only comment.')), 'comment appears in place');
+    await page.goto(liveBase + '#/prs/pr/nimbus-cli-31');
+    await page.waitForFunction(() => document.querySelector('[data-pr-action=merge]')?.textContent === 'Merge');
+    await page.locator('[data-pr-action=merge]').first().click();
+    await page.locator('dialog select').selectOption('rebase');
+    check((await page.locator('dialog pre').innerText()) === 'gh pr merge 31 -R nimbus/cli --rebase', 'merge dialog shows selected exact command');
+    await act('merge', () => page.locator('dialog button[type=submit]').click());
+    check(await page.locator('[data-pr-action=merge]').count() === 0, 'merged PR updates controls in place');
+    await page.goto(liveBase + '#/prs/pr/acme-web-150');
+    await page.waitForFunction(() => document.querySelector('.pr-shipbar [data-pr-action=ship]')?.textContent === 'Preview & send');
+    await page.waitForSelector('#pr-diff .pr-finding');
+    await act('flag', () => page.locator('#pr-findings [data-pr-action=flag][data-finding=f-3]').click());
+    check(await page.evaluate(() => document.activeElement.dataset.finding === 'f-3'), 'flag action preserves keyboard focus');
+    check((await page.locator('.pr-shipbar').innerText()).includes('3 findings flagged'), 'flag changes sticky count in place');
+    await page.locator('#pr-diff [role=button][data-n]').first().click();
+    await page.locator('dialog input[name=title]').fill('Fixture finding');
+    await page.locator('dialog textarea[name=body]').fill('Please add a test for this branch.');
+    await act('finding', () => page.locator('dialog button[type=submit]').click());
+    check((await page.locator('#pr-findings').innerText()).includes('Fixture finding'), 'line click adds finding');
+    await act('ship', () => page.locator('.pr-shipbar [data-pr-action=ship]').click());
+    await page.waitForSelector('dialog[open]');
+    check((await page.locator('dialog pre').innerText()).includes('Leftover') === false, 'preview contains exact bodies without added titles');
+    await page.screenshot({ path: path.join(SHOTS, 'prs-live-ship-preview.png') });
+    await act('ship', () => page.locator('dialog button[type=submit]').click());
+    check((await page.locator('.pr-shipbar').innerText()).includes('0 findings flagged'), 'ship clears flags in place');
+    check(await page.locator('#pr-findings [data-pr-action=flag]').count() === 2, 'only unposted drafts retain toggles');
+    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), reviews = calls.filter((c) => c.argv[1]?.endsWith('/reviews'));
+    check(reviews.length === 1 && JSON.parse(reviews[0].input).comments.length === 3, 'click-through posts exactly one selected review with three comments');
+    check(errors.length === 0, 'live PR pages have no JS errors: ' + errors.join(' | '));
+    // Last page action replaced data, without navigation/reload.
+    await page.evaluate(() => { window.prTestMarker = 'no reload'; });
+    await act('sync', () => page.locator('[data-pr-action=sync]').click());
+    check(await page.evaluate(() => window.prTestMarker === 'no reload'), 'live response updates without reloading page');
+    await ctx.close();
+  } finally { child.kill(); fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
 try {
+  await prsPages();
   await ideasDesign('mobile', { width: 412, height: 915 });
   await ideasDesign('desktop', { width: 1440, height: 900 });
   await ideasDesign('mobile', { width: 412, height: 915 }, 'dark');

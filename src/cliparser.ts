@@ -2,7 +2,7 @@
 import { ArgumentParser, SUPPRESS } from './argparse.js';
 import { VERSION } from './version.js';
 
-const KINDS = ['ui', 'backend', 'ideas', 'design'];
+const KINDS = ['ui', 'backend', 'ideas', 'design', 'prs'];
 const IDEA_STATUSES = ['proposed', 'go', 'maybe', 'no', 'done'];
 const LEVELS = ['low', 'medium', 'high'];
 const SIZES = ['S', 'M', 'L'];
@@ -12,11 +12,11 @@ const PLAN_STATUSES = ['todo', 'doing', 'partial', 'done', 'dropped'];
 function reviewArg(p: ArgumentParser, several = false): void {
   p.addArgument(['review'], several ? {
     nargs: '*',
-    help: 'review.json, its folder or a kind (ui, backend, ideas, design); several, or a parent folder such as .review, give one '
+    help: 'review.json, its folder or a kind (ui, backend, ideas, design, prs); several, or a parent folder such as .review, give one '
       + 'combined site (default: auto-discover, combining every .review/<kind>/ when there are several)',
   } : {
     nargs: '?',
-    help: 'path to review.json or its folder, or a kind (ui, backend, ideas, design) for .review/<kind>/ (default: auto-discover)',
+    help: 'path to review.json or its folder, or a kind (ui, backend, ideas, design, prs) for .review/<kind>/ (default: auto-discover)',
   });
   p.addArgument(['-r', '--review-path'], { dest: 'review_opt', help: SUPPRESS });
 }
@@ -27,7 +27,7 @@ function wordsArg(p: ArgumentParser, help: string): void {
   p.addArgument(['-r', '--review'], {
     dest: 'review_opt',
     metavar: 'REVIEW',
-    help: 'path to review.json or its folder, or a kind (ideas, design) for .review/<kind>/ (default: auto-discover)',
+    help: 'path to review.json or its folder, or a kind (ideas, design, prs) for .review/<kind>/ (default: auto-discover)',
   });
 }
 
@@ -48,7 +48,7 @@ export function parser(): ArgumentParser {
   let s = sub.addParser('init', { help: 'scaffold review.json, screenshots/ and pending/' });
   s.addArgument(['dir'], { nargs: '?', default: '.review', help: 'directory to create (default .review)' });
   s.addArgument(['--name'], { help: 'project name (default: current folder name)' });
-  s.addArgument(['--kind'], { choices: KINDS, help: 'ui (UI/UX), backend, ideas or design; sets the title and platform defaults' });
+  s.addArgument(['--kind'], { choices: KINDS, help: 'ui (UI/UX), backend, ideas, design or prs (PR dashboard); sets the title and platform defaults' });
   s.addArgument(['--title'], { help: 'shown after the name, e.g. "UI/UX audit" (default from --kind, else "Review")' });
   s.addArgument(['--platforms'], {
     help: 'comma list, e.g. "mobile,desktop" or "web" (default mobile,desktop; none for backend)',
@@ -60,7 +60,7 @@ export function parser(): ArgumentParser {
     help: 'set a repo up: create (or reuse) .review/<kind>/ and point AGENTS.md at the review-kit skill',
   });
   s.addArgument(['repo'], { nargs: '?', default: '.', help: 'repository folder (default: current folder)' });
-  s.addArgument(['--kind'], { default: 'ui', help: 'comma list of review kinds: ui, backend, ideas, design (default ui)' });
+  s.addArgument(['--kind'], { default: 'ui', help: 'comma list of review kinds: ui, backend, ideas, design, prs (default ui)' });
   s.addArgument(['--dir'], {
     default: '.review',
     help: 'parent folder for the reviews (default .review, giving .review/ui/ ...)',
@@ -112,6 +112,14 @@ export function parser(): ArgumentParser {
   s.addArgument(['--no-build'], { action: 'store_true' });
   s.addArgument(['--max-width'], { type: 'int' });
   s.addArgument(['--force'], { action: 'store_true' });
+  s.addArgument(['--sync-prs'], {
+    metavar: 'MINUTES', type: 'int',
+    help: 'PR dashboards: re-sync every PR from GitHub on this interval and rebuild (default off)',
+  });
+  s.addArgument(['--allow-remote-actions'], {
+    action: 'store_true',
+    help: 'PR dashboards: override the binding gate with a warning (API requests still require a loopback Host)',
+  });
 
   s = sub.addParser('add-issue', { help: 'add (or --update) issues from flags or JSON' });
   reviewArg(s);
@@ -303,6 +311,11 @@ export function parser(): ArgumentParser {
   s.addArgument(['--force'], { action: 'store_true', help: 'also remove worktrees with uncommitted changes' });
   s.addArgument(['-n', '--dry-run'], { action: 'store_true', help: 'list what would be removed' });
 
+  prParser(sub.addParser('pr', {
+    help: 'PR dashboard: add, sync and list pull requests across repositories, review them and act on them through gh',
+    usage: 'review-kit pr <subcommand> [-r REVIEW] ... (see `review-kit pr -h`)',
+  }));
+
   s = sub.addParser('companions', {
     help: 'show, install or update the bundled agent skills that UI/UX, backend and design reviews use',
   });
@@ -312,7 +325,7 @@ export function parser(): ArgumentParser {
     default: 'list',
     help: 'list (default), install (link the bundled skills), update (maintainers: refresh the bundle)',
   });
-  s.addArgument(['--kind'], { help: 'comma list: ui, backend, ideas, design (default ui,backend, which covers every companion)' });
+  s.addArgument(['--kind'], { help: 'comma list: ui, backend, ideas, design, prs (default ui,backend, which covers every companion)' });
   s.addArgument(['--skills-dir'], {
     action: 'append',
     metavar: 'DIR',
@@ -374,4 +387,89 @@ export function parser(): ArgumentParser {
   });
   s.addArgument(['--quality'], { metavar: 'N', type: 'int', default: 80, help: 'JPEG quality (default 80)' });
   return p;
+}
+
+/** `review-kit pr <sub>`: every subcommand takes -r/--review (default: the prs review found here). */
+function prParser(p: ArgumentParser): void {
+  const ps = p.addSubparsers({ dest: 'pr_cmd', metavar: '<subcommand>' });
+  ps.required = true;
+  const mk = (name: string, help: string, id = true) => {
+    const q = ps.addParser(name, { help });
+    q.addArgument(['-r', '--review'], {
+      dest: 'review_opt', metavar: 'REVIEW',
+      help: 'path to review.json or its folder, or prs for .review/prs/ (default: the PR dashboard found here)',
+    });
+    if (id) q.addArgument(['id'], { help: 'PR id, e.g. acme-web-142 (`review-kit pr list` shows them)' });
+    return q;
+  };
+  let q = mk('add', 'add PRs by URL, owner/repo#123 or owner/repo 123 (or --mine / --requested) and sync them', false);
+  q.addArgument(['refs'], { nargs: '*', metavar: 'REF', help: 'https://github.com/o/r/pull/1, o/r#1 or o/r 1' });
+  q.addArgument(['--mine'], { action: 'store_true', help: 'all my open PRs (gh search prs --author @me)' });
+  q.addArgument(['--requested'], { action: 'store_true', help: 'open PRs waiting for my review (role reviewing)' });
+  q.addArgument(['--reviewing'], { action: 'store_true', help: 'the PRs given are ones I review, not mine' });
+  q.addArgument(['--repo'], { action: 'append', metavar: 'OWNER/NAME', help: 'with --mine/--requested: only this repository (repeatable)' });
+  q.addArgument(['--priority'], { type: 'int', help: 'lower = more urgent' });
+  q.addArgument(['--next'], { help: 'the next step, one plain line' });
+  q.addArgument(['--no-sync'], { action: 'store_true', help: 'only record the PRs; sync later' });
+
+  q = mk('sync', 'refresh PRs from GitHub (all, or the ids given)', false);
+  q.addArgument(['ids'], { nargs: '*', metavar: 'ID' });
+  q.addArgument(['--all'], { action: 'store_true', help: 'also re-fetch merged and closed PRs' });
+
+  q = mk('list', 'print the board as a table: group, id, title, blockers, next', false);
+  q.addArgument(['--json'], { action: 'store_true', help: 'print id, group and blockers per PR as JSON' });
+
+  q = mk('set', 'change the fields you own: priority, next step, notes, dependencies');
+  q.addArgument(['--priority'], { type: 'int' });
+  q.addArgument(['--no-priority'], { action: 'store_true', help: 'clear the priority' });
+  q.addArgument(['--next'], { help: 'next step (plain text; "" clears it)' });
+  q.addArgument(['--notes'], { help: 'Markdown ("" clears them)' });
+  q.addArgument(['--depends'], { metavar: 'IDS', help: 'comma list of PR ids that must merge first ("" clears)' });
+  q.addArgument(['--role'], { choices: ['mine', 'reviewing'] });
+
+  mk('remove', 'take a PR off the board (nothing changes on GitHub)');
+
+  q = mk('comment', 'post a comment on the PR');
+  q.addArgument(['--body'], { required: true, help: 'Markdown' });
+  q = mk('reply', 'reply to a review thread');
+  q.addArgument(['thread'], { help: 'thread id (PRRT_...)' });
+  q.addArgument(['--body'], { required: true, help: 'Markdown' });
+  q = mk('resolve', 'resolve (or --unresolve) a review thread');
+  q.addArgument(['thread'], { help: 'thread id (PRRT_...)' });
+  q.addArgument(['--unresolve'], { action: 'store_true' });
+  q = mk('rerun', 're-run the failed GitHub Actions runs of the head commit');
+  q.addArgument(['--all'], { action: 'store_true', help: 're-run every job of those runs, not only the failed ones' });
+  q = mk('update-branch', 'bring the base branch into the PR branch (merge, or --rebase)');
+  q.addArgument(['--rebase'], { action: 'store_true' });
+  q = mk('ready', 'mark a draft ready for review (or --undo: back to draft)');
+  q.addArgument(['--undo'], { action: 'store_true' });
+  q = mk('merge', 'merge the PR (pick --squash, --merge or --rebase)');
+  for (const m of ['squash', 'merge', 'rebase']) q.addArgument(['--' + m], { dest: 'method', action: 'store_const', const: m });
+  q.addArgument(['--auto'], { action: 'store_true', help: 'merge once the requirements are met' });
+  q.addArgument(['--delete-branch'], { action: 'store_true' });
+  mk('close', 'close the PR');
+  mk('reopen', 'reopen the PR');
+  q = mk('request', 'request reviews');
+  q.addArgument(['--reviewers'], { required: true, metavar: 'A,B', help: 'comma list of logins or org/team' });
+
+  q = mk('finding', 'record (or --update, or --drop) a review finding on a PR you review');
+  q.addArgument(['--finding'], { metavar: 'FID', help: 'finding id (default f-<n>; with --update: the one to change)' });
+  q.addArgument(['--update'], { action: 'store_true' });
+  q.addArgument(['--drop'], { metavar: 'FID', help: 'drop this finding (it is kept, marked dropped)' });
+  q.addArgument(['--title'], { help: 'one plain line' });
+  q.addArgument(['--body'], { help: 'Markdown: exactly what would be posted' });
+  q.addArgument(['--path'], { help: 'file in the PR ("" for a general comment)' });
+  q.addArgument(['--line'], { type: 'int' });
+  q.addArgument(['--start-line'], { type: 'int', help: 'first line of a multi-line comment' });
+  q.addArgument(['--side'], { choices: ['LEFT', 'RIGHT'], help: 'RIGHT (new code, default) or LEFT (removed code)' });
+  q.addArgument(['--severity'], { choices: ['P0', 'P1', 'P2', 'nit'] });
+  q.addArgument(['--ship'], { action: 'store_true', help: "flag it to ship (only on the user's word)" });
+  q = mk('flag', 'flag findings to ship in the next review (or --off)');
+  q.addArgument(['findings'], { metavar: 'FIDS', help: 'comma list, e.g. f-1,f-3' });
+  q.addArgument(['--off'], { action: 'store_true' });
+  q = mk('verdict', 'set the verdict of the next review');
+  q.addArgument(['--event'], { required: true, choices: ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] });
+  q.addArgument(['--body'], { help: 'Markdown summary' });
+  q = mk('ship', 'post ONE GitHub review with the flagged findings and the verdict (--dry-run prints the JSON)');
+  q.addArgument(['-n', '--dry-run'], { action: 'store_true' });
 }

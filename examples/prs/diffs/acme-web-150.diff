@@ -1,0 +1,50 @@
+diff --git a/src/cart/CartSummary.tsx b/src/cart/CartSummary.tsx
+index 1f2e3d4..5c6b7a8 100644
+--- a/src/cart/CartSummary.tsx
++++ b/src/cart/CartSummary.tsx
+@@ -1,20 +1,31 @@
+ import { formatMoney } from '../money';
+ import type { Cart } from './types';
+ 
+ export function CartSummary({ cart }: { cart: Cart }) {
+-  const total = cart.items.reduce((n, i) => n + i.price * i.qty, 0);
++  const subtotal = cart.items.reduce((n, i) => n + i.price * i.qty, 0);
++  const discount = cart.coupon ? subtotal * cart.coupon.percent / 100 : 0;
++  const total = subtotal - discount;
+   return (
+     <dl className="summary">
++      <dt>Subtotal</dt>
++      <dd>{formatMoney(subtotal)}</dd>
++      {cart.coupon && (
++        <>
++          <dt>Coupon {cart.coupon.code}</dt>
++          <dd>-{formatMoney(discount)}</dd>
++        </>
++      )}
+       <dt>Total</dt>
+       <dd>{formatMoney(total)}</dd>
+     </dl>
+   );
+ }
+diff --git a/src/cart/applyCoupon.ts b/src/cart/applyCoupon.ts
+new file mode 100644
+index 0000000..9a8b7c6
+--- /dev/null
++++ b/src/cart/applyCoupon.ts
+@@ -0,0 +1,16 @@
++import { http } from '../api/http';
++import type { Cart, Coupon } from './types';
++
++export async function applyCoupon(cart: Cart, code: string): Promise<Cart> {
++  const res = await http.get<Coupon>(`/coupons/${code}`);
++  if (res.percent > 100) throw new Error('Invalid coupon');
++  return { ...cart, coupon: res };
++}
++
++export function couponError(e: unknown): string {
++  if (e instanceof Error) return e.message;
++  return 'Something went wrong';
++}
++
++// TODO remove
++console.log('coupon module loaded');

@@ -194,3 +194,24 @@ review-kit discard design first-run --dry-run       # then without --dry-run, if
 - `clean` never touches worktrees, branches or diffs.
 
 Then run a UI or backend review of the adopted change, so it gets the usual issues, fixes and before/after evidence.
+
+## Pull request dashboard
+
+```sh
+review-kit init .review/prs --kind prs --name "My PRs"
+review-kit pr add --mine --repo acme/web --repo acme/api
+review-kit pr add --requested
+review-kit pr add acme/web#150 --reviewing
+review-kit pr sync
+review-kit pr set acme-web-150 --next "Read the coupon diff" --priority 1
+review-kit build prs
+review-kit serve prs --sync-prs 5
+```
+
+Mine PRs show CI, conflicts, review decisions, unresolved threads and dependencies. The board filters by role, repo and text; terminal `pr list` and `summary prs` use the same derived status. Merged/closed PRs stay visible but normally stop syncing (`pr sync --all` refreshes them).
+
+For reviewing, draft with `pr finding <id> --title ... --body ... --path src/a.ts --line 42`, suggest `pr verdict <id> --event REQUEST_CHANGES --body ...`, then let the user choose `pr flag <id> f-1,f-3`. `pr ship <id> --dry-run` prints the exact JSON; `pr ship <id>` posts one review and records which findings were sent. No finding is sent merely because it exists. Off-diff and stale findings are retained with a location note. Own-PR approval/change requests are refused.
+
+Live actions are available only when a PR review is served on loopback. They use a per-start token, same-origin checks, a JSON body limit and serialized execution. Merge/close/rerun/update-branch confirm the exact command; ship previews all comments and the verdict. `--sync-prs` refreshes in the background, and the page offers reload when another action or sync changes the build. File pages never fetch; LAN binding disables actions and shows copyable standalone `gh` commands. `--allow-remote-actions` overrides the binding gate with a warning; API Host checks still require loopback. Offline finding edits and flags are temporary until reload; use the CLI for persistent drafts.
+
+Agents may sync, add and diagnose freely. Outward actions, selecting ship flags, PR code changes and pushes follow the explicit approval rules in [prs-review.md](../skill/review-kit/prs-review.md). Code fixes belong in a separate worktree.

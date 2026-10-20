@@ -1,0 +1,24 @@
+diff --git a/cmd/nimbus/completion.go b/cmd/nimbus/completion.go
+new file mode 100644
+index 0000000..b1c2d3e
+--- /dev/null
++++ b/cmd/nimbus/completion.go
+@@ -0,0 +1,18 @@
++package main
++
++import (
++	"os"
++
++	"github.com/spf13/cobra"
++)
++
++// TODO: fish and PowerShell
++var completionCmd = &cobra.Command{
++	Use:       "completion [bash|zsh]",
++	Short:     "Print a shell completion script",
++	ValidArgs: []string{"bash", "zsh"},
++	Args:      cobra.ExactValidArgs(1),
++	RunE: func(cmd *cobra.Command, args []string) error {
++		return rootCmd.GenBashCompletion(os.Stdout)
++	},
++}

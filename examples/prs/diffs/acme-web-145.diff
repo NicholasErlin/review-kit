@@ -1,0 +1,17 @@
+diff --git a/src/checkout/Receipt.tsx b/src/checkout/Receipt.tsx
+index 2c3d4e5..6f7a8b9 100644
+--- a/src/checkout/Receipt.tsx
++++ b/src/checkout/Receipt.tsx
+@@ -8,8 +8,12 @@ export function Receipt({ payment }: { payment: Payment }) {
+   return (
+     <section aria-labelledby="receipt-h">
+       <h2 id="receipt-h">Payment received</h2>
+-      <p>Order {payment.orderId}</p>
++      <p>Order {payment.orderId}{payment.replayed ? ' (already paid)' : ''}</p>
++      {payment.replayed && (
++        <p className="note">We found an earlier payment for this order, so you were not charged again.</p>
++      )}
+       <p>Total {formatMoney(payment.total)}</p>
+     </section>
+   );
+ }

@@ -1,0 +1,65 @@
+diff --git a/app/payments/routes.py b/app/payments/routes.py
+index 4e1f0aa..b7c2d19 100644
+--- a/app/payments/routes.py
++++ b/app/payments/routes.py
+@@ -14,10 +14,24 @@ router = APIRouter(prefix="/orders")
+ 
+ 
+ @router.post("/{order_id}/pay")
+-async def pay(order_id: str, db: Session = Depends(get_db)) -> PaymentOut:
++async def pay(
++    order_id: str,
++    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
++    db: Session = Depends(get_db),
++) -> PaymentOut:
++    if idempotency_key:
++        prior = idempotency.lookup(db, idempotency_key)
++        if prior is not None:
++            if prior.order_id != order_id:
++                raise HTTPException(409, "Idempotency-Key reused for another order")
++            return prior.response
+     order = orders.get_or_404(db, order_id)
+-    return payments.charge(db, order)
++    result = payments.charge(db, order)
++    if idempotency_key:
++        idempotency.store(db, idempotency_key, order_id, result)
++    return result
+diff --git a/app/payments/idempotency.py b/app/payments/idempotency.py
+new file mode 100644
+index 0000000..0d9e8b2
+--- /dev/null
++++ b/app/payments/idempotency.py
+@@ -0,0 +1,22 @@
++"""Remember the response to a payment request by its Idempotency-Key for 24 hours."""
++from datetime import datetime, timedelta, timezone
++
++from sqlalchemy.orm import Session
++
++from app.models import IdempotentResponse
++
++TTL = timedelta(hours=24)
++
++
++def lookup(db: Session, key: str) -> IdempotentResponse | None:
++    row = db.get(IdempotentResponse, key)
++    if row is None or row.created < datetime.now(timezone.utc) - TTL:
++        return None
++    return row
++
++
++def store(db: Session, key: str, order_id: str, response) -> None:
++    db.add(IdempotentResponse(key=key, order_id=order_id, response=response))
++    db.commit()
+diff --git a/migrations/0042_idempotent_responses.sql b/migrations/0042_idempotent_responses.sql
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/migrations/0042_idempotent_responses.sql
+@@ -0,0 +1,7 @@
++CREATE TABLE idempotent_responses (
++    key        TEXT PRIMARY KEY,
++    order_id   TEXT NOT NULL REFERENCES orders(id),
++    response   JSONB NOT NULL,
++    created    TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX idempotent_responses_created ON idempotent_responses (created);

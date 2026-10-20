@@ -1,0 +1,914 @@
+{
+  "$schema": "https://unpkg.com/@horus52/review-kit/schema/review.schema.json",
+  "version": 1,
+  "project": {
+    "name": "My PRs",
+    "title": "Pull requests",
+    "kind": "prs",
+    "description": "Open pull requests across **acme/web**, **acme/api** and **nimbus/cli**. The payments pair lands in order: api#88 first, then web#145.",
+    "theme": {
+      "accent": "#24476b",
+      "logoText": "PR"
+    }
+  },
+  "prs": [
+    {
+      "id": "acme-web-142",
+      "repo": "acme/web",
+      "number": 142,
+      "url": "https://github.com/acme/web/pull/142",
+      "priority": 1,
+      "next": "Fix the lint error and the flaky retry test, then answer alice's two threads",
+      "notes": "Test failure looks like the `sessionStorage` mock is shared between tests. Reset it in `beforeEach`.",
+      "added": "2026-10-17T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "Send an idempotency key with every payment",
+        "body": "A double click on **Pay** could charge twice. The form now sends an `Idempotency-Key` header that stays the same for the order and page load.\n\n- New hook `useIdempotencyKey`\n- `submitPayment` takes the key\n- Test for a retry\n\nNeeds acme/api#88 to do anything on the server.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "sam",
+        "head": "payments/idempotency-key",
+        "base": "main",
+        "headSha": "9f8e7d1c2b3a",
+        "created": "2026-10-16T14:20:00Z",
+        "updated": "2026-10-20T08:40:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "BLOCKED",
+        "reviewDecision": "CHANGES_REQUESTED",
+        "additions": 38,
+        "deletions": 3,
+        "changedFiles": 4,
+        "labels": [
+          "payments",
+          "bug"
+        ],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "test",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "url": "https://github.com/acme/web/actions/runs/7001/job/1",
+            "runId": 7001
+          },
+          {
+            "name": "lint",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "url": "https://github.com/acme/web/actions/runs/7001/job/2",
+            "runId": 7001
+          },
+          {
+            "name": "typecheck",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7001/job/3",
+            "runId": 7001
+          },
+          {
+            "name": "preview",
+            "workflow": "Deploy preview",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7002/job/1",
+            "runId": 7002
+          }
+        ],
+        "reviews": [
+          {
+            "author": "alice",
+            "state": "CHANGES_REQUESTED",
+            "submitted": "2026-10-18T10:05:00Z",
+            "body": "Good idea. Two things before this goes in: the key should not survive a reload after a **successful** payment, and the hook needs a test of its own.",
+            "url": "https://github.com/acme/web/pull/142#pullrequestreview-1"
+          },
+          {
+            "author": "bob",
+            "state": "COMMENTED",
+            "submitted": "2026-10-18T12:30:00Z",
+            "body": "Fine by me once alice is happy.",
+            "url": "https://github.com/acme/web/pull/142#pullrequestreview-2"
+          }
+        ],
+        "threads": [
+          {
+            "id": "PRRT_web142_a",
+            "path": "src/checkout/useIdempotencyKey.ts",
+            "line": 6,
+            "resolved": false,
+            "outdated": false,
+            "comments": [
+              {
+                "author": "alice",
+                "body": "Clear this after a successful payment, otherwise paying for the same order again after a refund replays the old response.",
+                "created": "2026-10-18T10:01:00Z",
+                "url": "https://github.com/acme/web/pull/142#discussion_r1"
+              }
+            ]
+          },
+          {
+            "id": "PRRT_web142_b",
+            "path": "src/api/payments.ts",
+            "line": 5,
+            "resolved": false,
+            "outdated": false,
+            "comments": [
+              {
+                "author": "alice",
+                "body": "Can `opts` be optional so the admin tool keeps compiling?",
+                "created": "2026-10-18T10:03:00Z",
+                "url": "https://github.com/acme/web/pull/142#discussion_r2"
+              },
+              {
+                "author": "sam",
+                "body": "The admin tool should send a key too. I'll update it in this PR.",
+                "created": "2026-10-18T15:10:00Z",
+                "url": "https://github.com/acme/web/pull/142#discussion_r3"
+              }
+            ]
+          },
+          {
+            "id": "PRRT_web142_c",
+            "path": "src/checkout/PaymentForm.tsx",
+            "line": 3,
+            "resolved": true,
+            "outdated": true,
+            "comments": [
+              {
+                "author": "bob",
+                "body": "Nit: import order.",
+                "created": "2026-10-18T12:25:00Z",
+                "url": "https://github.com/acme/web/pull/142#discussion_r4"
+              }
+            ]
+          }
+        ],
+        "comments": [
+          {
+            "author": "sam",
+            "body": "Rebased on main. CI is red on lint; fixing.",
+            "created": "2026-10-19T09:00:00Z",
+            "url": "https://github.com/acme/web/pull/142#issuecomment-1"
+          }
+        ],
+        "files": [
+          {
+            "path": "src/checkout/PaymentForm.tsx",
+            "add": 3,
+            "del": 1
+          },
+          {
+            "path": "src/checkout/useIdempotencyKey.ts",
+            "add": 14,
+            "del": 0
+          },
+          {
+            "path": "src/api/payments.ts",
+            "add": 7,
+            "del": 2
+          },
+          {
+            "path": "src/checkout/PaymentForm.test.tsx",
+            "add": 9,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/acme-web-142.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "acme-api-88",
+      "repo": "acme/api",
+      "number": 88,
+      "url": "https://github.com/acme/api/pull/88",
+      "priority": 1,
+      "next": "Rebase on main and renumber the migration (0042 is taken)",
+      "added": "2026-10-17T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "Honour Idempotency-Key on POST /orders/{id}/pay",
+        "body": "Stores the response to a payment for 24 hours by its `Idempotency-Key` and replays it for a repeat request. A key reused for another order gets **409**.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "sam",
+        "head": "idempotent-payments",
+        "base": "main",
+        "headSha": "b7c2d19e0f11",
+        "created": "2026-10-15T09:00:00Z",
+        "updated": "2026-10-19T16:45:00Z",
+        "mergedAt": null,
+        "mergeable": "CONFLICTING",
+        "mergeState": "DIRTY",
+        "reviewDecision": "APPROVED",
+        "additions": 46,
+        "deletions": 2,
+        "changedFiles": 3,
+        "labels": [
+          "payments"
+        ],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "pytest",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5120/job/1",
+            "runId": 5120
+          },
+          {
+            "name": "ruff",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5120/job/2",
+            "runId": 5120
+          },
+          {
+            "name": "migrations",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5120/job/3",
+            "runId": 5120
+          }
+        ],
+        "reviews": [
+          {
+            "author": "carol",
+            "state": "APPROVED",
+            "submitted": "2026-10-17T11:00:00Z",
+            "body": "Looks right. The 24 h window matches what the payment provider does.",
+            "url": "https://github.com/acme/api/pull/88#pullrequestreview-1"
+          }
+        ],
+        "threads": [
+          {
+            "id": "PRRT_api88_a",
+            "path": "app/payments/idempotency.py",
+            "line": 13,
+            "resolved": true,
+            "outdated": false,
+            "comments": [
+              {
+                "author": "carol",
+                "body": "Should expired rows be cleaned up?",
+                "created": "2026-10-16T10:00:00Z",
+                "url": "https://github.com/acme/api/pull/88#discussion_r1"
+              },
+              {
+                "author": "sam",
+                "body": "Yes, the nightly job deletes rows older than a day. Added the index for it.",
+                "created": "2026-10-16T13:00:00Z",
+                "url": "https://github.com/acme/api/pull/88#discussion_r2"
+              }
+            ]
+          }
+        ],
+        "comments": [],
+        "files": [
+          {
+            "path": "app/payments/routes.py",
+            "add": 17,
+            "del": 2
+          },
+          {
+            "path": "app/payments/idempotency.py",
+            "add": 22,
+            "del": 0
+          },
+          {
+            "path": "migrations/0042_idempotent_responses.sql",
+            "add": 7,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/acme-api-88.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "nimbus-cli-31",
+      "repo": "nimbus/cli",
+      "number": 31,
+      "url": "https://github.com/nimbus/cli/pull/31",
+      "priority": 2,
+      "next": "Merge (squash)",
+      "added": "2026-10-18T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:56:00Z",
+        "title": "Read the config from XDG_CONFIG_HOME",
+        "body": "Looks for `$XDG_CONFIG_HOME/nimbus/config.toml`, then the OS config folder, instead of `~/.nimbus.toml`.\n\nCloses #12.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "sam",
+        "head": "xdg-config",
+        "base": "main",
+        "headSha": "9d0e1f2a3b4c",
+        "created": "2026-10-18T07:30:00Z",
+        "updated": "2026-10-19T18:00:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "CLEAN",
+        "reviewDecision": "APPROVED",
+        "additions": 21,
+        "deletions": 4,
+        "changedFiles": 2,
+        "labels": [
+          "enhancement"
+        ],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "go test",
+            "workflow": "ci",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/nimbus/cli/actions/runs/880/job/1",
+            "runId": 880
+          },
+          {
+            "name": "golangci-lint",
+            "workflow": "ci",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/nimbus/cli/actions/runs/880/job/2",
+            "runId": 880
+          },
+          {
+            "name": "goreleaser check",
+            "workflow": "release",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+            "url": "https://github.com/nimbus/cli/actions/runs/881/job/1",
+            "runId": 881
+          }
+        ],
+        "reviews": [
+          {
+            "author": "dana",
+            "state": "APPROVED",
+            "submitted": "2026-10-19T17:50:00Z",
+            "body": "",
+            "url": "https://github.com/nimbus/cli/pull/31#pullrequestreview-1"
+          }
+        ],
+        "threads": [],
+        "comments": [
+          {
+            "author": "dana",
+            "body": "Thanks! Can you mention the move in the changelog when this ships?",
+            "created": "2026-10-19T17:52:00Z",
+            "url": "https://github.com/nimbus/cli/pull/31#issuecomment-1"
+          }
+        ],
+        "files": [
+          {
+            "path": "cmd/nimbus/config.go",
+            "add": 11,
+            "del": 4
+          },
+          {
+            "path": "cmd/nimbus/config_test.go",
+            "add": 10,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/nimbus-cli-31.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "acme-web-145",
+      "repo": "acme/web",
+      "number": 145,
+      "url": "https://github.com/acme/web/pull/145",
+      "priority": 3,
+      "next": "Wait for api#88, then ask bob again",
+      "dependsOn": [
+        "acme-api-88"
+      ],
+      "added": "2026-10-19T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "Say so on the receipt when a payment was replayed",
+        "body": "When the API answers with a replayed payment, the receipt says the order was already paid instead of looking like a second charge.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "sam",
+        "head": "payments/replayed-receipt",
+        "base": "main",
+        "headSha": "6f7a8b9c0d1e",
+        "created": "2026-10-19T08:10:00Z",
+        "updated": "2026-10-20T09:30:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "BLOCKED",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "additions": 5,
+        "deletions": 1,
+        "changedFiles": 1,
+        "labels": [
+          "payments"
+        ],
+        "reviewRequests": [
+          "bob"
+        ],
+        "checks": [
+          {
+            "name": "test",
+            "workflow": "CI",
+            "status": "IN_PROGRESS",
+            "conclusion": null,
+            "url": "https://github.com/acme/web/actions/runs/7010/job/1",
+            "runId": 7010
+          },
+          {
+            "name": "lint",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7010/job/2",
+            "runId": 7010
+          },
+          {
+            "name": "typecheck",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7010/job/3",
+            "runId": 7010
+          }
+        ],
+        "reviews": [],
+        "threads": [],
+        "comments": [],
+        "files": [
+          {
+            "path": "src/checkout/Receipt.tsx",
+            "add": 5,
+            "del": 1
+          }
+        ],
+        "diff": "diffs/acme-web-145.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "nimbus-cli-34",
+      "repo": "nimbus/cli",
+      "number": 34,
+      "url": "https://github.com/nimbus/cli/pull/34",
+      "next": "Add fish and PowerShell, then mark ready",
+      "added": "2026-10-19T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:56:00Z",
+        "title": "Add `nimbus completion` for bash and zsh",
+        "body": "Work in progress. zsh currently prints the bash script.",
+        "state": "OPEN",
+        "draft": true,
+        "author": "sam",
+        "head": "completion",
+        "base": "main",
+        "headSha": "b1c2d3e4f5a6",
+        "created": "2026-10-19T19:00:00Z",
+        "updated": "2026-10-19T19:05:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "DRAFT",
+        "reviewDecision": null,
+        "additions": 18,
+        "deletions": 0,
+        "changedFiles": 1,
+        "labels": [],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "go test",
+            "workflow": "ci",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/nimbus/cli/actions/runs/902/job/1",
+            "runId": 902
+          }
+        ],
+        "reviews": [],
+        "threads": [],
+        "comments": [],
+        "files": [
+          {
+            "path": "cmd/nimbus/completion.go",
+            "add": 18,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/nimbus-cli-34.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "acme-api-85",
+      "repo": "acme/api",
+      "number": 85,
+      "url": "https://github.com/acme/api/pull/85",
+      "added": "2026-10-14T08:00:00Z",
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "Return 404 instead of 500 for an unknown order",
+        "body": "`orders.get_or_404` raised `KeyError` for a missing row.",
+        "state": "MERGED",
+        "draft": false,
+        "author": "sam",
+        "head": "orders-404",
+        "base": "main",
+        "headSha": "aa11bb22cc33",
+        "created": "2026-10-13T10:00:00Z",
+        "updated": "2026-10-16T09:00:00Z",
+        "mergedAt": "2026-10-16T09:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeState": "UNKNOWN",
+        "reviewDecision": "APPROVED",
+        "additions": 6,
+        "deletions": 2,
+        "changedFiles": 2,
+        "labels": [
+          "bug"
+        ],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "pytest",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5090/job/1",
+            "runId": 5090
+          }
+        ],
+        "reviews": [
+          {
+            "author": "carol",
+            "state": "APPROVED",
+            "submitted": "2026-10-15T15:00:00Z",
+            "body": "",
+            "url": "https://github.com/acme/api/pull/85#pullrequestreview-1"
+          }
+        ],
+        "threads": [],
+        "comments": [],
+        "files": [
+          {
+            "path": "app/orders/service.py",
+            "add": 3,
+            "del": 2
+          },
+          {
+            "path": "tests/test_orders.py",
+            "add": 3,
+            "del": 0
+          }
+        ],
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "acme-web-150",
+      "repo": "acme/web",
+      "number": 150,
+      "url": "https://github.com/acme/web/pull/150",
+      "role": "reviewing",
+      "priority": 1,
+      "next": "Ship the two flagged findings with Request changes",
+      "added": "2026-10-19T09:00:00Z",
+      "findings": [
+        {
+          "id": "f-1",
+          "severity": "P1",
+          "title": "Encode the coupon code in the URL",
+          "body": "A code like `SAVE/10` or `A#B` changes the path or drops the rest of it. Please build the URL with `encodeURIComponent(code)`:\n\n```ts\nconst res = await http.get<Coupon>(`/coupons/${encodeURIComponent(code)}`);\n```",
+          "path": "src/cart/applyCoupon.ts",
+          "line": 5,
+          "side": "RIGHT",
+          "sha": "9a8b7c6d5e4f",
+          "ship": true,
+          "status": "draft"
+        },
+        {
+          "id": "f-2",
+          "severity": "P1",
+          "title": "Round the discount to whole cents",
+          "body": "`subtotal * percent / 100` can give fractions of a cent (15% of 9.99), and the total then differs from what the API charges. Could you round with `Math.round` on cents, the way `formatMoney` expects?",
+          "path": "src/cart/CartSummary.tsx",
+          "line": 6,
+          "side": "RIGHT",
+          "sha": "9a8b7c6d5e4f",
+          "ship": true,
+          "status": "draft"
+        },
+        {
+          "id": "f-3",
+          "severity": "nit",
+          "title": "Leftover console.log",
+          "body": "Nit: this logs on every page load; I think it can go.",
+          "path": "src/cart/applyCoupon.ts",
+          "startLine": 15,
+          "line": 16,
+          "side": "RIGHT",
+          "sha": "9a8b7c6d5e4f",
+          "ship": false,
+          "status": "draft"
+        },
+        {
+          "id": "f-4",
+          "severity": "P2",
+          "title": "No test for applyCoupon",
+          "body": "A small test for an unknown code (404) and for `percent > 100` would keep this from regressing.",
+          "sha": "9a8b7c6d5e4f",
+          "ship": false,
+          "status": "draft"
+        }
+      ],
+      "verdict": {
+        "event": "REQUEST_CHANGES",
+        "body": "Thanks, the summary reads well. Two things to fix before this goes in (URL encoding and cent rounding); the rest are suggestions."
+      },
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "Coupons in the cart",
+        "body": "Adds a coupon field to the cart. The summary shows the subtotal, the coupon and the total.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "lee",
+        "head": "cart-coupons",
+        "base": "main",
+        "headSha": "9a8b7c6d5e4f",
+        "created": "2026-10-18T13:00:00Z",
+        "updated": "2026-10-19T16:00:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "BLOCKED",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "additions": 27,
+        "deletions": 1,
+        "changedFiles": 2,
+        "labels": [
+          "cart"
+        ],
+        "reviewRequests": [
+          "sam"
+        ],
+        "checks": [
+          {
+            "name": "test",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7020/job/1",
+            "runId": 7020
+          },
+          {
+            "name": "lint",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/web/actions/runs/7020/job/1",
+            "runId": 7020
+          }
+        ],
+        "reviews": [],
+        "threads": [],
+        "comments": [],
+        "files": [
+          {
+            "path": "src/cart/CartSummary.tsx",
+            "add": 11,
+            "del": 1
+          },
+          {
+            "path": "src/cart/applyCoupon.ts",
+            "add": 16,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/acme-web-150.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "acme-api-91",
+      "repo": "acme/api",
+      "number": 91,
+      "url": "https://github.com/acme/api/pull/91",
+      "role": "reviewing",
+      "priority": 2,
+      "next": "Re-review: carol pushed after my review",
+      "added": "2026-10-17T09:00:00Z",
+      "findings": [
+        {
+          "id": "f-1",
+          "severity": "P1",
+          "title": "Rate-limit coupon lookups",
+          "body": "Without a limit this endpoint lets anyone enumerate coupon codes. `_rate_limit_key` exists but is not used yet.",
+          "path": "app/coupons/routes.py",
+          "line": 19,
+          "side": "RIGHT",
+          "sha": "0c0ffee12345",
+          "ship": false,
+          "status": "posted",
+          "posted": {
+            "at": "2026-10-18T11:00:00Z",
+            "url": "https://github.com/acme/api/pull/91#pullrequestreview-9",
+            "reviewId": 9,
+            "sha": "0c0ffee12345"
+          }
+        }
+      ],
+      "gh": {
+        "fetched": "2026-10-20T09:55:00Z",
+        "title": "GET /coupons/{code}",
+        "body": "Looks up an active coupon by code (case-insensitive).",
+        "state": "OPEN",
+        "draft": false,
+        "author": "carol",
+        "head": "coupons",
+        "base": "main",
+        "headSha": "3e4f5a6b7c8d",
+        "created": "2026-10-17T08:00:00Z",
+        "updated": "2026-10-20T07:15:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "BLOCKED",
+        "reviewDecision": "CHANGES_REQUESTED",
+        "additions": 20,
+        "deletions": 0,
+        "changedFiles": 1,
+        "labels": [],
+        "reviewRequests": [],
+        "checks": [
+          {
+            "name": "pytest",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5130/job/1",
+            "runId": 5130
+          },
+          {
+            "name": "ruff",
+            "workflow": "CI",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/acme/api/actions/runs/5130/job/1",
+            "runId": 5130
+          }
+        ],
+        "reviews": [
+          {
+            "author": "sam",
+            "state": "CHANGES_REQUESTED",
+            "submitted": "2026-10-18T11:00:00Z",
+            "body": "Needs a rate limit before it can ship.",
+            "url": "https://github.com/acme/api/pull/91#pullrequestreview-9",
+            "commit": "0c0ffee12345"
+          }
+        ],
+        "threads": [
+          {
+            "id": "PRRT_api91_a",
+            "path": "app/coupons/routes.py",
+            "line": 19,
+            "resolved": false,
+            "outdated": false,
+            "comments": [
+              {
+                "author": "sam",
+                "body": "Without a limit this endpoint lets anyone enumerate coupon codes. `_rate_limit_key` exists but is not used yet.",
+                "created": "2026-10-18T11:00:00Z",
+                "url": "https://github.com/acme/api/pull/91#discussion_r9"
+              },
+              {
+                "author": "carol",
+                "body": "Added a limiter in the latest push, can you take another look?",
+                "created": "2026-10-20T07:16:00Z",
+                "url": "https://github.com/acme/api/pull/91#discussion_r10"
+              }
+            ]
+          }
+        ],
+        "comments": [],
+        "files": [
+          {
+            "path": "app/coupons/routes.py",
+            "add": 20,
+            "del": 0
+          }
+        ],
+        "diff": "diffs/acme-api-91.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    },
+    {
+      "id": "nimbus-cli-36",
+      "repo": "nimbus/cli",
+      "number": 36,
+      "url": "https://github.com/nimbus/cli/pull/36",
+      "role": "reviewing",
+      "priority": 3,
+      "next": "Check f-1 against the new push, then decide what to send",
+      "added": "2026-10-19T09:00:00Z",
+      "findings": [
+        {
+          "id": "f-1",
+          "severity": "P2",
+          "title": "Say where the token came from",
+          "body": "When `NIMBUS_TOKEN` is set, could the message say so? Otherwise a stale token in the environment is hard to spot.",
+          "path": "cmd/nimbus/login.go",
+          "line": 44,
+          "side": "RIGHT",
+          "sha": "1111aaa2222b",
+          "ship": false,
+          "status": "draft"
+        },
+        {
+          "id": "f-2",
+          "severity": "P1",
+          "title": "whoami errors are ignored",
+          "body": "`whoami(token)` can fail (expired token) and the command still says it logged in. Please return the error instead.",
+          "path": "cmd/nimbus/login.go",
+          "line": 42,
+          "side": "RIGHT",
+          "sha": "4d5e6f7a8b9c",
+          "ship": false,
+          "status": "draft"
+        }
+      ],
+      "verdict": {
+        "event": "COMMENT",
+        "body": "Nice simplification. A couple of questions below."
+      },
+      "gh": {
+        "fetched": "2026-10-20T09:56:00Z",
+        "title": "Read the token from NIMBUS_TOKEN",
+        "body": "Lets CI log in without a prompt.",
+        "state": "OPEN",
+        "draft": false,
+        "author": "dana",
+        "head": "token-env",
+        "base": "main",
+        "headSha": "4d5e6f7a8b9c",
+        "created": "2026-10-18T10:00:00Z",
+        "updated": "2026-10-19T20:00:00Z",
+        "mergedAt": null,
+        "mergeable": "MERGEABLE",
+        "mergeState": "BLOCKED",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "additions": 14,
+        "deletions": 4,
+        "changedFiles": 1,
+        "labels": [
+          "ci"
+        ],
+        "reviewRequests": [
+          "sam"
+        ],
+        "checks": [
+          {
+            "name": "go test",
+            "workflow": "ci",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "url": "https://github.com/nimbus/cli/actions/runs/910/job/1",
+            "runId": 910
+          }
+        ],
+        "reviews": [],
+        "threads": [],
+        "comments": [],
+        "files": [
+          {
+            "path": "cmd/nimbus/login.go",
+            "add": 14,
+            "del": 4
+          }
+        ],
+        "diff": "diffs/nimbus-cli-36.diff",
+        "diffTruncated": false,
+        "viewer": "sam"
+      }
+    }
+  ]
+}

@@ -7,9 +7,10 @@ import * as images from './images.js';
 import { print } from './io.js';
 import * as markdown from './markdown.js';
 import * as model from './model.js';
+import * as prs from './prs.js';
 import { dumps } from './pyjson.js';
 import {
-  abspath, capitalize, cmpStr, exists, get, has, isabs, isdir, isfile, islink, join, listdir, normpath, pySlice,
+  abspath, capitalize, cmpStr, dirname, exists, get, has, isabs, isdir, isfile, islink, join, listdir, normpath, pySlice,
   readText, realpath, relpath, sorted, splitext, strftime, strip, truthy, walk,
 } from './py.js';
 import * as safety from './safety.js';
@@ -41,6 +42,7 @@ export class Assets {
   base: string;
   out: string;
   files = new Map<string, string>(); // site rel path -> abs source
+  generated = new Map<string, Buffer>(); // site rel path -> content written by the build (PR diff scripts)
   cache = new Map<string, Record<string, any>>();
   stats: Stats = { copied: 0, resized: 0, kept: 0 };
 
@@ -91,14 +93,54 @@ export class Assets {
     return `${dest}?v=${images.fingerprint(absSrc)}`;
   }
 
+  /**
+   * A PR diff: the raw file is published with the same size cap (a "raw diff" link), plus a small script that registers its text in
+   * window.REVIEW_DIFFS[key], so the page can load it with a <script> tag (no fetch: the CSP blocks connections).
+   */
+  diff(rel: string, cap: number): Record<string, any> | null {
+    const absSrc = safety.localSource(this.base, rel);
+    if (!isfile(absSrc)) return null;
+    const dest = this.dest(absSrc, 'files');
+    this.files.set(dest, absSrc);
+    let buf = fs.readFileSync(absSrc);
+    let truncated = false;
+    if (buf.length > cap) {
+      const nl = buf.subarray(0, cap).lastIndexOf(0x0a);
+      buf = buf.subarray(0, nl > 0 ? nl + 1 : cap);
+      truncated = true;
+    }
+    this.generated.set(dest, buf); // cap the downloadable patch too, including hand-edited input
+    const v = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 10);
+    const js = `${dest}.js`;
+    const text = JSON.stringify(buf.toString('utf8')).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+    this.generated.set(js, Buffer.from(`(window.REVIEW_DIFFS = window.REVIEW_DIFFS || {})[${JSON.stringify(dest)}] = ${text};\n`, 'utf8'));
+    return { src: `${js}?v=${v}`, key: dest, raw: `${dest}?v=${v}`, bytes: buf.length, truncated };
+  }
+
+  /** Every site path this review publishes. */
+  dests(): string[] {
+    return [...new Set([...this.files.keys(), ...this.generated.keys()])];
+  }
+
   write(): void {
     this.publish();
-    prune(this.out, this.files.keys());
+    prune(this.out, this.dests());
   }
 
   /** Copy (or resize) every recorded file into the site. */
   publish(): void {
+    for (const [dest, buf] of this.generated) {
+      const target = join(this.out, dest);
+      if (isfile(target) && fs.readFileSync(target).equals(buf)) {
+        this.stats.kept += 1;
+        continue;
+      }
+      fs.mkdirSync(dirname(target), { recursive: true });
+      model.writeText(target, buf);
+      this.stats.copied += 1;
+    }
     for (const [dest, src] of this.files) {
+      if (this.generated.has(dest)) continue;
       const target = join(this.out, dest);
       const mw = dest.startsWith('img/') ? this.maxWidth : null;
       this.stats[images.publish(src, target, mw, this.tool)] += 1;
@@ -200,6 +242,7 @@ export function compileData(data: any, base: string, assets: Assets): Record<str
     return { id: dget(g, 'id', ''), title: g.title, platform: get(g, 'platform') ?? null, intro: rich(get(g, 'intro')), items };
   });
   const { research, ideas, proposals } = compileIdeas(data, base, assets, fmt, img);
+  const prList = compilePrs(data, base, assets, rich);
   const appendix = (get(data, 'appendix') || []).map((a: any) => ({ title: a.title, platform: get(a, 'platform') ?? null, body: rich(a.body) }));
   const theme = or(get(proj, 'theme'), {});
   const outPlats = plats.map((p: any) => {
@@ -233,7 +276,16 @@ export function compileData(data: any, base: string, assets: Assets): Record<str
     proposalStatusLabels: PROPOSAL_LABELS,
     optionStatusLabels: OPTION_LABELS,
     areas, issues, fixes, plan, appendix, research, ideas, proposals,
+    prs: prList, prGroups: { mine: prs.MINE_GROUPS, reviewing: prs.REVIEWING_GROUPS }, prGroupLabels: prs.GROUP_LABELS,
   };
+}
+
+/** The PR dashboard's PRs in board order (see prs.compilePr for the shape). */
+function compilePrs(data: any, base: string, assets: Assets, rich: (t: any) => string): any[] {
+  const list = prs.prList(data);
+  if (!list.length) return [];
+  const st = prs.statuses(data);
+  return prs.boardOrder(data, st).map((p) => prs.compilePr(p, st.get(p.id)!, rich, (rel) => assets.diff(rel, prs.PR_DIFF_CAP), base));
 }
 
 /** Weighted total of an option's scores, normalised to 0-100 (a missing score counts as 0); null without criteria. */
@@ -402,6 +454,7 @@ function siteStats(site: Record<string, any>, assets: Assets): Record<string, an
     status: {} as Record<string, number>,
     research: site.research.length, ideas: site.ideas.length, proposals: site.proposals.length,
     options: site.proposals.reduce((n: number, p: any) => n + p.options.length, 0),
+    prs: site.prs.length,
   };
   for (const i of counted) stats.status[i.status] = (stats.status[i.status] || 0) + 1;
   return stats;
@@ -409,7 +462,7 @@ function siteStats(site: Record<string, any>, assets: Assets): Record<string, an
 
 function statsLine(stats: Record<string, any>, assets: Stats): string {
   const st = Object.keys(stats.status).sort(cmpStr).map((k) => `${stats.status[k]} ${k}`).join(', ');
-  const extra = [[stats.research, 'research entries'], [stats.ideas, 'ideas'], [stats.proposals, 'proposals'], [stats.options, 'options']]
+  const extra = [[stats.prs, 'PRs'], [stats.research, 'research entries'], [stats.ideas, 'ideas'], [stats.proposals, 'proposals'], [stats.options, 'options']]
     .filter(([n]) => n).map(([n, what]) => `${n} ${what}, `).join('');
   const head = extra && !stats.issues && !stats.fixes ? '' // an ideas or design review: no empty issue counts
     : `${stats.issues} issues (${st || 'none'}), ${stats.fixes} fixes with ${stats.pairs} before/after pairs, `;
@@ -438,7 +491,7 @@ export function build(reviewPath: string, out: string, opts: BuildOptions = {}):
   assets.write();
   const proj = site.project;
   writeSite(out, 'window.REVIEW = ' + dumps(site, null) + ';\n', strip(`${S(proj.name)} ${S(proj.title)}`),
-    proj.theme.accent, [...assets.files.keys()]);
+    proj.theme.accent, assets.dests());
   const stats = siteStats(site, assets);
   Object.assign(stats, { warnings, assets: assets.stats, resizer: tool, out: abspath(out) });
   if (!quiet) {
@@ -452,15 +505,15 @@ export function build(reviewPath: string, out: string, opts: BuildOptions = {}):
 
 // ---------------------------------------------------------------- several reviews in one site
 /** Switch labels and order for the review kinds; other kinds sort after these, labelled by their title. */
-export const KIND_ORDER = ['ideas', 'design', 'ui', 'backend'];
-export const KIND_LABELS: Record<string, string> = { ideas: 'Ideas', design: 'Designs', ui: 'UI/UX', backend: 'Backend' };
+export const KIND_ORDER = ['prs', 'ideas', 'design', 'ui', 'backend'];
+export const KIND_LABELS: Record<string, string> = { prs: 'PRs', ideas: 'Ideas', design: 'Designs', ui: 'UI/UX', backend: 'Backend' };
 // View names a review key must not shadow in combined-site hashes. "ideas" is a view too, but the ideas review
 // keeps that key (its links are #/ideas/ideas/<id>).
-const RESERVED_KEYS = new Set(['', 'all', 'overview', 'fixes', 'issues', 'plan', 'research', 'proposals']);
+const RESERVED_KEYS = new Set(['', 'all', 'overview', 'fixes', 'issues', 'plan', 'research', 'proposals', 'board', 'pr']);
 
 export interface ReviewRef { path: string; key: string; label: string; kind: string; data: any; base: string; warnings: string[] }
 
-/** Load and validate several reviews, order them (ideas, design, ui, backend, then the rest) and give each a unique hash key. */
+/** Load and validate several reviews, order them (prs, ideas, design, ui, backend, then the rest) and give each a unique hash key. */
 export function loadReviews(reviewPaths: string[], checkFiles = true): ReviewRef[] {
   const refs = reviewPaths.map((p) => {
     const [data, base, warnings] = loadValid(p, checkFiles, p);
@@ -500,7 +553,7 @@ export function buildCombined(reviewPaths: string[], out: string, opts: BuildOpt
   const dests: string[] = [];
   for (const c of compiled) {
     c.assets.publish();
-    dests.push(...c.assets.files.keys());
+    dests.push(...c.assets.dests());
   }
   prune(abspath(out), dests);
   const reviews = compiled.map((c) => ({ key: c.r.key, label: c.r.label, data: c.site }));

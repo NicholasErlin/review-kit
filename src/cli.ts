@@ -11,10 +11,12 @@ import { parser } from './cliparser.js';
 import * as companions from './companions.js';
 import * as design from './design.js';
 import * as edit from './edit.js';
+import * as gh from './gh.js';
 import { ReviewError } from './errors.js';
 import * as ideas from './ideas.js';
 import { eprint, print } from './io.js';
 import * as model from './model.js';
+import * as prs from './prs.js';
 import { dumps, JSONDecodeError, loads } from './pyjson.js';
 import {
   abspath, basename, copyDict, decodeUtf8, dirname, exists, get, has, isabs, isdir, isDict, isfile, isOSError, join,
@@ -212,7 +214,9 @@ async function cmdServe(a: Namespace): Promise<number> {
     const out = siteOut(a, paths);
     if (!a.no_build) ignoreSite(a, paths, out);
     if (!a.no_build) buildAny(paths, out, { maxWidth: a.max_width, force: a.force });
-    server = await serveMod.serve(out, a.host, a.port, { reviewPath: paths, watch: a.watch, maxWidth: a.max_width });
+    server = await serveMod.serve(out, a.host, a.port, {
+      reviewPath: paths, watch: a.watch, maxWidth: a.max_width, syncPrs: a.sync_prs, allowRemoteActions: a.allow_remote_actions,
+    });
   }
   await new Promise<void>((resolve) => {
     process.once('SIGINT', () => {
@@ -647,7 +651,8 @@ async function cmdCompanions(a: Namespace): Promise<void> {
     return;
   }
   const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - Array.from(s).length));
-  for (const k of kinds) if (!companions.COMPANIONS[k].length) print(`${pad(k, 8)} (no companion skills; research uses web search and the codebase)`);
+  const none: Record<string, string> = { ideas: 'research uses web search and the codebase', prs: 'the dashboard uses gh and the PR diffs' };
+  for (const k of kinds) if (!companions.COMPANIONS[k].length) print(`${pad(k, 8)} (no companion skills; ${none[k] || 'none needed'})`);
   for (const [k, c, p] of rows) {
     print(`${pad(k, 8)} ${pad(c.name, 24)} ${p || 'not installed'}`);
     print(`${pad('', 8)} ${pad('', 24)} ${c.use}`);
@@ -660,6 +665,112 @@ async function cmdCompanions(a: Namespace): Promise<void> {
 
 function cmdSetup(a: Namespace): void {
   for (const line of setup({ skillsDirs: a.skills_dir, noSkill: a.no_skill, withCompanions: a.with_companions })) print(line);
+}
+
+// ---------------------------------------------------------------- PR dashboard
+function cmdPr(a: Namespace): number {
+  const sub: string = a.pr_cmd;
+  const path = findFor(a.review_opt, 'prs', (h) => `review-kit pr ${sub} -r ${h} ...`);
+  const base = model.baseDir(path);
+  const data = edit.loadChecked(path);
+  if (get(data.project, 'kind') !== 'prs' && !prs.prList(data).length) {
+    throw new ReviewError(`${path} is a ${String(get(data.project, 'kind') ?? 'ui')} review, not a PR dashboard; `
+      + 'create one with `review-kit init .review/prs --kind prs`');
+  }
+  let code = 0;
+  const log: string[] = [];
+  const save = () => {
+    const warnings = edit.check(data, base);
+    model.save(path, data);
+    for (const w of warnings) if (!/never synced|last synced/.test(w)) print('warning:', w);
+  };
+  const pr = () => prs.findPr(data, a.id);
+  if (sub === 'list') {
+    if (a.json) {
+      const st = prs.statuses(data);
+      print(dumps(prs.boardOrder(data, st).map((p) => ({ id: p.id, repo: p.repo, number: p.number, role: prs.role(p), ...st.get(p.id) })), 2, true));
+    } else print(prs.table(data));
+    return 0;
+  }
+  if (sub === 'add') {
+    const refs = gh.parseRefs(a.refs || []);
+    if ((a.mine || a.requested) && refs.length) throw new ReviewError('pr add: give refs, or --mine / --requested, not both');
+    if (a.repo && !a.mine && !a.requested) throw new ReviewError('pr add: --repo goes with --mine or --requested');
+    const groups: [gh.PrRef[], 'mine' | 'reviewing'][] = [];
+    if (a.mine) groups.push([gh.search(a.repo || [], false), 'mine']);
+    if (a.requested) groups.push([gh.search(a.repo || [], true), 'reviewing']);
+    if (refs.length) groups.push([refs, a.reviewing ? 'reviewing' : 'mine']);
+    if (!groups.length) throw new ReviewError('pr add: give a PR (URL, owner/repo#123 or owner/repo 123), or --mine / --requested');
+    const f: prs.UserFields = {};
+    if (a.priority !== null && a.priority !== undefined) f.priority = a.priority;
+    if (a.next !== null && a.next !== undefined) f.next = a.next;
+    for (const [list, role] of groups) {
+      if (!list.length) log.push(role === 'mine' ? 'no open PRs of yours found' : 'no open PRs wait for your review');
+      const res = prs.add(base, data, list, f, !a.no_sync, role);
+      log.push(...res.log);
+      if (!res.ok) code = 1;
+    }
+  } else if (sub === 'sync') {
+    for (const r of prs.sync(base, data, a.ids || [], a.all)) {
+      log.push(r.line);
+      if (!r.ok) code = 1;
+    }
+  } else if (sub === 'set') {
+    const p = pr();
+    const f: prs.UserFields = {};
+    if (a.no_priority) f.priority = null;
+    else if (a.priority !== null && a.priority !== undefined) f.priority = a.priority;
+    if (a.next !== null && a.next !== undefined) f.next = a.next;
+    if (a.notes !== null && a.notes !== undefined) f.notes = a.notes;
+    if (a.depends !== null && a.depends !== undefined) f.dependsOn = csv(a.depends);
+    prs.applyFields(p, f);
+    if (a.role === 'reviewing') p.role = 'reviewing';
+    else if (a.role === 'mine') delete p.role;
+    log.push(`${p.id}: updated`);
+  } else if (sub === 'remove') {
+    log.push(prs.remove(data, a.id));
+  } else if (sub === 'finding') {
+    const p = pr();
+    if (a.drop) log.push(prs.drop(p, a.drop));
+    else {
+      const it = prs.upsertFinding(p, {
+        id: a.finding, title: a.title, body: a.body, path: a.path, line: a.line ?? undefined, startLine: a.start_line ?? undefined, side: a.side,
+        severity: a.severity, ship: a.ship ? true : undefined,
+      }, a.update);
+      log.push(`${p.id}: finding ${it.id} [${it.severity}] ${it.title}` + (it.path ? ` at ${it.path}${it.line ? ':' + it.line : ''}` : ' (general)')
+        + (it.ship ? ' (flagged to ship)' : ''));
+      if (prs.role(p) !== 'reviewing') log.push(`note: ${p.id} is one of your PRs; \`review-kit pr set ${p.id} --role reviewing\` if you review it`);
+    }
+  } else if (sub === 'flag') {
+    log.push(prs.flag(pr(), csv(a.findings), !a.off));
+  } else if (sub === 'verdict') {
+    log.push(prs.setVerdict(pr(), a.event, a.body));
+  } else if (sub === 'ship') {
+    const res = prs.ship(base, data, a.id, a.dry_run);
+    if (a.dry_run) {
+      for (const m of res.plan.moved) eprint(`note: ${m.id} goes in the review body: ${m.why}`);
+      print(JSON.stringify(res.plan.payload, null, 2));
+      eprint(res.message);
+      return 0;
+    }
+    log.push(res.message);
+    if (res.posted?.url) log.push(`review: ${res.posted.url}`);
+    if (!res.synced) code = 1;
+  } else {
+    const args: prs.ActionArgs = {
+      body: a.body ?? undefined, thread: a.thread ?? undefined, unresolve: a.unresolve, all: a.all, rebase: a.rebase, undo: a.undo,
+      method: a.method ?? undefined, auto: a.auto, deleteBranch: a.delete_branch,
+      reviewers: a.reviewers !== undefined && a.reviewers !== null ? csv(a.reviewers) : undefined,
+    };
+    if (sub === 'merge' && !a.method) throw new ReviewError('pr merge: pick --squash, --merge or --rebase');
+    const res = prs.act(base, data, a.id, sub, args);
+    log.push(res.message);
+    if (res.syncError) log.push(`warning: ${res.syncError}`);
+    if (!res.synced) code = 1;
+  }
+  save();
+  for (const line of log) print(line);
+  return code;
 }
 
 // ---------------------------------------------------------------- main
@@ -680,6 +791,7 @@ const COMMANDS: Record<string, (a: Namespace) => void | number | Promise<void | 
   recommend: cmdRecommend,
   adopt: cmdAdopt,
   discard: cmdDiscard,
+  pr: cmdPr,
   mark: cmdMark,
   'apply-pending': cmdApplyPending,
   summary: cmdSummary,
